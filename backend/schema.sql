@@ -20,6 +20,32 @@ CREATE TABLE IF NOT EXISTS products (
   certifications TEXT
 );
 
+CREATE TABLE IF NOT EXISTS scanned_products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  barcode TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  brand TEXT,
+  size TEXT,
+  serving TEXT,
+  price REAL,
+  nutriscore TEXT,
+  nova INTEGER,
+  ingredients TEXT,
+  allergens TEXT,
+  labels TEXT,
+  categories TEXT,
+  calories REAL,
+  fat REAL,
+  saturated_fat REAL,
+  carbs REAL,
+  sugars REAL,
+  fiber REAL,
+  protein REAL,
+  salt REAL,
+  sodium REAL,
+  scanned_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS raw_detections (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,

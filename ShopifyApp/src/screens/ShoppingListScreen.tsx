@@ -1,50 +1,41 @@
 import React, { useState } from 'react';
 import {
   FlatList,
+  Image,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { useShoppingStore, type ItemStatus, type ShoppingItem } from '../store/shoppingStore';
-import { useNavigation } from '@react-navigation/native';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { RootTabParamList } from '../../App';
+import { launchImageLibrary } from 'react-native-image-picker';
+import { useShoppingStore, type ShoppingItem } from '../store/shoppingStore';
 
-type Nav = BottomTabNavigationProp<RootTabParamList>;
-
-const STATUS_COLOR: Record<ItemStatus, string> = {
-  pending:   '#3a3a3a',
-  detected:  '#14532d',
-  not_found: '#450a0a',
-};
-
-const STATUS_BORDER: Record<ItemStatus, string> = {
-  pending:   '#555',
-  detected:  '#22c55e',
-  not_found: '#ef4444',
-};
-
-const STATUS_LABEL: Record<ItemStatus, string> = {
-  pending:   'pending',
-  detected:  'identified',
-  not_found: 'not found',
-};
+function Checkbox({ checked }: { checked: boolean }) {
+  return (
+    <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+      {checked && <Text style={styles.checkmark}>✓</Text>}
+    </View>
+  );
+}
 
 function ItemRow({ item }: { item: ShoppingItem }) {
-  const removeItem = useShoppingStore((s) => s.removeItem);
+  const { removeItem, toggleCheck } = useShoppingStore();
   return (
-    <View style={[styles.row, { backgroundColor: STATUS_COLOR[item.status], borderLeftColor: STATUS_BORDER[item.status] }]}>
-      <View style={styles.rowLeft}>
-        <Text style={styles.itemName}>{item.name}</Text>
-        {item.detectedBrand ? (
-          <Text style={styles.itemSub}>{item.detectedBrand}</Text>
-        ) : (
-          <Text style={styles.itemSub}>{STATUS_LABEL[item.status]}</Text>
-        )}
-      </View>
-      <Pressable onPress={() => removeItem(item.id)} hitSlop={12}>
+    <View style={styles.row}>
+      <Pressable style={styles.rowMain} onPress={() => toggleCheck(item.id)}>
+        <Checkbox checked={!!item.checked} />
+        <View style={styles.rowContent}>
+          <Text style={[styles.itemName, item.checked && styles.itemNameChecked]}>
+            {item.name}
+          </Text>
+          {item.section ? (
+            <Text style={styles.itemSection}>{item.section}</Text>
+          ) : null}
+        </View>
+      </Pressable>
+      <Pressable onPress={() => removeItem(item.id)} hitSlop={12} style={styles.removeBtn}>
         <Text style={styles.removeText}>✕</Text>
       </Pressable>
     </View>
@@ -52,68 +43,110 @@ function ItemRow({ item }: { item: ShoppingItem }) {
 }
 
 export default function ShoppingListScreen() {
-  const [input, setInput] = useState('');
-  const { items, addItem, resetDetections } = useShoppingStore();
-  const navigation = useNavigation<Nav>();
+  const { items, addItem, storeMap, setStoreMap } = useShoppingStore();
+  const [showAdd, setShowAdd] = useState(false);
+  const [addText, setAddText] = useState('');
+  const [showMapModal, setShowMapModal] = useState(false);
 
-  const detected  = items.filter(i => i.status === 'detected').length;
-  const pending   = items.filter(i => i.status === 'pending').length;
-  const notFound  = items.filter(i => i.status === 'not_found').length;
+  const checkedCount = items.filter((i) => i.checked).length;
 
-  const handleAdd = () => {
-    if (input.trim()) { addItem(input.trim()); setInput(''); }
+  const handleUploadMap = () => {
+    launchImageLibrary({ mediaType: 'photo', quality: 0.8, includeBase64: true }, (response) => {
+      if (response.assets && response.assets[0]?.base64) {
+        setStoreMap(response.assets[0].base64);
+      }
+    });
   };
 
-  const handleStartCapture = () => {
-    resetDetections();
-    navigation.navigate('Capture');
+  const handleAdd = () => {
+    if (addText.trim()) {
+      addItem(addText.trim());
+      setAddText('');
+    }
+    setShowAdd(false);
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Shopping list</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Shopping list</Text>
+        <View style={styles.headerRight}>
+          {items.length > 0 && (
+            <Text style={styles.counter}>{checkedCount} of {items.length}</Text>
+          )}
+          <Pressable onPress={() => setShowMapModal(true)} hitSlop={12} style={styles.mapBtn}>
+            <Text style={styles.mapBtnText}>{storeMap ? '🗺' : '🗺'}</Text>
+            {storeMap && <View style={styles.mapDot} />}
+          </Pressable>
+        </View>
+      </View>
 
-      {items.length > 0 && (
-        <Text style={styles.summary}>
-          {items.length} items
-          {detected > 0 ? ` · ${detected} identified` : ''}
-          {pending > 0 && detected > 0 ? ` · ${pending} pending` : ''}
-          {notFound > 0 ? ` · ${notFound} not found` : ''}
-        </Text>
-      )}
+      <Modal visible={showMapModal} transparent animationType="slide" onRequestClose={() => setShowMapModal(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowMapModal(false)}>
+          <Pressable style={styles.modalSheet} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Store Map</Text>
+            {storeMap ? (
+              <>
+                <Image source={{ uri: `data:image/jpeg;base64,${storeMap}` }} style={styles.mapPreview} resizeMode="contain" />
+                <Pressable style={styles.modalBtn} onPress={handleUploadMap}>
+                  <Text style={styles.modalBtnText}>Replace map</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalHint}>
+                  Upload a photo of the store map to enable aisle navigation.
+                </Text>
+                <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleUploadMap}>
+                  <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>Upload store map</Text>
+                </Pressable>
+              </>
+            )}
+            <Pressable style={[styles.modalBtn, { marginTop: 8 }]} onPress={() => setShowMapModal(false)}>
+              <Text style={styles.modalBtnText}>Done</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {items.length === 0 ? (
-        <Text style={styles.empty}>Add items to start scanning.</Text>
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyTitle}>Your list is empty</Text>
+          <Text style={styles.emptyText}>
+            Chat with the assistant to build your shopping list.
+          </Text>
+        </View>
       ) : (
         <FlatList
           data={items}
-          keyExtractor={i => i.id}
+          keyExtractor={(i) => i.id}
           renderItem={({ item }) => <ItemRow item={item} />}
           style={styles.list}
+          ItemSeparatorComponent={() => <View style={styles.divider} />}
           contentContainerStyle={styles.listContent}
         />
       )}
 
-      <View style={styles.bottom}>
-        <View style={styles.inputRow}>
-          <TextInput
-            style={styles.input}
-            value={input}
-            onChangeText={setInput}
-            onSubmitEditing={handleAdd}
-            placeholder="Add item..."
-            placeholderTextColor="#555"
-            returnKeyType="done"
-            autoCapitalize="none"
-          />
-          <Pressable style={styles.addBtn} onPress={handleAdd}>
-            <Text style={styles.addBtnText}>Add</Text>
-          </Pressable>
-        </View>
-
-        {items.length > 0 && (
-          <Pressable style={styles.startBtn} onPress={handleStartCapture}>
-            <Text style={styles.startBtnText}>▶  Start capture</Text>
+      <View style={styles.footer}>
+        {showAdd ? (
+          <View style={styles.addInputRow}>
+            <TextInput
+              style={styles.addInput}
+              value={addText}
+              onChangeText={setAddText}
+              placeholder="Item name..."
+              placeholderTextColor="#555"
+              autoFocus
+              onSubmitEditing={handleAdd}
+              returnKeyType="done"
+            />
+            <Pressable onPress={handleAdd} style={styles.addConfirm}>
+              <Text style={styles.addConfirmText}>Add</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable style={styles.addButton} onPress={() => setShowAdd(true)}>
+            <Text style={styles.addButtonText}>+ add item</Text>
           </Pressable>
         )}
       </View>
@@ -122,37 +155,222 @@ export default function ShoppingListScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0f0f0f', paddingHorizontal: 16, paddingTop: 60 },
-  title:        { fontSize: 26, fontWeight: '700', color: '#fff', marginBottom: 4 },
-  summary:      { fontSize: 13, color: '#888', marginBottom: 16 },
-  empty:        { color: '#444', fontSize: 15, textAlign: 'center', marginTop: 80 },
-  list:         { flex: 1 },
-  listContent:  { gap: 8, paddingBottom: 8 },
+  container: {
+    flex: 1,
+    backgroundColor: '#111',
+    paddingTop: 60,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  counter: {
+    fontSize: 14,
+    color: '#888',
+  },
+  mapBtn: {
+    position: 'relative',
+    padding: 4,
+  },
+  mapBtnText: {
+    fontSize: 20,
+  },
+  mapDot: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
+    borderWidth: 1.5,
+    borderColor: '#111',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: '#1a1a1a',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    paddingBottom: 40,
+    gap: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  modalHint: {
+    fontSize: 14,
+    color: '#888',
+    lineHeight: 20,
+  },
+  mapPreview: {
+    width: '100%',
+    height: 220,
+    borderRadius: 12,
+    backgroundColor: '#2a2a2a',
+  },
+  modalBtn: {
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  modalBtnPrimary: {
+    backgroundColor: '#22c55e',
+    borderColor: '#22c55e',
+  },
+  modalBtnText: {
+    color: '#888',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalBtnTextPrimary: {
+    color: '#fff',
+  },
+  list: {
+    flex: 1,
+  },
+  listContent: {
+    paddingBottom: 16,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#2a2a2a',
+    marginLeft: 56,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingRight: 20,
+  },
+  rowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    gap: 16,
+  },
+  removeBtn: {
+    paddingLeft: 8,
+  },
+  removeText: {
+    color: '#444',
+    fontSize: 14,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#22c55e',
+    borderColor: '#22c55e',
+  },
+  checkmark: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  rowContent: {
+    flex: 1,
+  },
+  itemName: {
+    fontSize: 16,
+    color: '#fff',
+    textTransform: 'capitalize',
+  },
+  itemNameChecked: {
+    color: '#555',
+    textDecorationLine: 'line-through',
+  },
+  itemSection: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  emptyBox: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  emptyText: {
+    color: '#555',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  footer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingBottom: 32,
+  },
+  addButton: {
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
     borderRadius: 12,
-    padding: 14,
-    borderLeftWidth: 4,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
-  rowLeft:      { flex: 1 },
-  itemName:     { fontSize: 16, fontWeight: '600', color: '#fff', textTransform: 'capitalize' },
-  itemSub:      { fontSize: 13, color: '#888', marginTop: 2 },
-  removeText:   { color: '#555', fontSize: 14, paddingLeft: 12 },
-  bottom:       { paddingVertical: 12, gap: 10 },
-  inputRow:     { flexDirection: 'row', gap: 8 },
-  input: {
-    flex: 1, height: 46, backgroundColor: '#1a1a1a', borderRadius: 12,
-    paddingHorizontal: 14, color: '#fff', fontSize: 15, borderWidth: 1, borderColor: '#2a2a2a',
+  addButtonText: {
+    color: '#888',
+    fontSize: 15,
   },
-  addBtn: {
-    height: 46, paddingHorizontal: 20, backgroundColor: '#3b82f6',
-    borderRadius: 12, justifyContent: 'center',
+  addInputRow: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    borderRadius: 12,
+    overflow: 'hidden',
   },
-  addBtnText:   { color: '#fff', fontWeight: '700', fontSize: 15 },
-  startBtn: {
-    height: 52, backgroundColor: '#3b82f6', borderRadius: 14,
-    justifyContent: 'center', alignItems: 'center',
+  addInput: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#fff',
+    fontSize: 15,
   },
-  startBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  addConfirm: {
+    paddingHorizontal: 18,
+    justifyContent: 'center',
+    backgroundColor: '#22c55e',
+  },
+  addConfirmText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 15,
+  },
 });

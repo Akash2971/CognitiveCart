@@ -1,56 +1,195 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { useFocusEffect } from '@react-navigation/native';
+import Voice, { SpeechResultsEvent, SpeechErrorEvent } from '@react-native-voice/voice';
+import Tts from 'react-native-tts';
 import Wearables, { wearablesEmitter } from '../../WearablesModule';
-import StreamPreviewView from '../../StreamPreviewView';
-import { useShoppingStore, type ItemStatus } from '../store/shoppingStore';
-import type { RootTabParamList } from '../../App';
+import { useShoppingStore, type CaptureMessage } from '../store/shoppingStore';
+import BarcodeScanScreen from './BarcodeScanScreen';
 
-const BACKEND_URL = 'http://192.168.0.252:8000';
-const CAPTURE_INTERVAL_MS = 3000;
+const BACKEND_URL = 'http://192.168.0.252:8080';
 
-// Module-level flags — persist across tab switches, reset on app restart
+const DWELL_POLL_MS = 2000;
+const DWELL_MATCH_WEIGHT = 1.0;
+const DWELL_MISS_WEIGHT = -0.4;
+const DWELL_TRIGGER_SCORE = 5.0;    // anchor(+1) + 4 matches × 2s = ~10s
+const DWELL_HASH_THRESHOLD = 20;    // Hamming distance < 20 = same scene (out of 64 bits)
+const DWELL_CANDIDATE_STREAK = 2;   // consecutive matches needed to swap anchor
+
+function hammingDistance(a: string, b: string): number {
+  let d = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++;
+  return d;
+}
+
 let didRegister = false;
 let didGrantPermission = false;
 
-type Nav = BottomTabNavigationProp<RootTabParamList>;
-
 type StreamState = 'stopped' | 'waitingForDevice' | 'starting' | 'streaming' | 'paused';
 
-const CHIP_BG: Record<ItemStatus, string> = {
-  pending:   '#1c1c1c',
-  detected:  '#14532d',
-  not_found: '#450a0a',
-};
+function AssistantBubble({ msg, onFeedback }: {
+  msg: CaptureMessage;
+  onFeedback: (id: string, feedback: 'up' | 'down') => void;
+}) {
+  return (
+    <View style={styles.bubbleGroup}>
+      <View style={styles.assistantBubbleWrap}>
+        <Text style={styles.bubbleLabel}>Assistant</Text>
+        <View style={styles.assistantBubble}>
+          <Text style={styles.assistantBubbleText}>{msg.content}</Text>
+        </View>
+        {!msg.feedback && (
+          <View style={styles.feedbackRow}>
+            <Pressable style={styles.feedbackBtn} onPress={() => onFeedback(msg.id, 'up')}>
+              <Text style={styles.feedbackIcon}>👍</Text>
+            </Pressable>
+            <Pressable style={styles.feedbackBtn} onPress={() => onFeedback(msg.id, 'down')}>
+              <Text style={styles.feedbackIcon}>👎</Text>
+            </Pressable>
+          </View>
+        )}
+        {msg.feedback && (
+          <Text style={styles.feedbackGiven}>
+            {msg.feedback === 'up' ? '👍' : '👎'}
+          </Text>
+        )}
+      </View>
+      {msg.sessionEnd && (
+        <View style={styles.sessionEndRow}>
+          <View style={styles.sessionEndLine} />
+          <Text style={styles.sessionEndText}>Session ended</Text>
+          <View style={styles.sessionEndLine} />
+        </View>
+      )}
+    </View>
+  );
+}
 
-const CHIP_BORDER: Record<ItemStatus, string> = {
-  pending:   '#333',
-  detected:  '#22c55e',
-  not_found: '#ef4444',
-};
+function UserBubble({ msg }: { msg: CaptureMessage }) {
+  return (
+    <View style={styles.userBubbleWrap}>
+      <Text style={styles.bubbleLabelRight}>You said</Text>
+      <View style={styles.userBubble}>
+        <Text style={styles.userBubbleText}>{msg.content}</Text>
+      </View>
+    </View>
+  );
+}
 
 export default function LiveCaptureScreen() {
-  const navigation = useNavigation<Nav>();
-  const [streamState, setStreamState] = useState<StreamState>('stopped');
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [frameCount, setFrameCount] = useState(0);
-  const [lastLatency, setLastLatency] = useState<number | null>(null);
-  const [lastError, setLastError] = useState<string | null>(null);
+  const {
+    captureMessages,
+    captureMode,
+    storeMap,
+    addCaptureMessage,
+    setCaptureFeedback,
+    endCaptureSession,
+    setCaptureMode,
+  } = useShoppingStore();
 
-  const { items, sessionId, setSessionId, updateDetection } = useShoppingStore();
-  const sessionIdRef = useRef<string | null>(sessionId);
-  const captureLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [streamState, setStreamState] = React.useState<StreamState>('stopped');
+  const [isPTTHeld, setIsPTTHeld] = React.useState(false);
+  const [isProcessing, setIsProcessing] = React.useState(false);
+  const [showBarcodeScanner, setShowBarcodeScanner] = React.useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const transcriptRef = useRef<string>('');
 
-  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  // Dwell detection refs
+  const dwellScore = useRef(0);
+  const dwellAnchor = useRef<string | null>(null);
+  const dwellCandidate = useRef<string | null>(null);
+  const dwellCandidateStreak = useRef(0);
+  const dwellTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Stable refs so the interval callback always sees current state
+  const isProcessingRef = useRef(isProcessing);
+  const isPTTHeldRef = useRef(isPTTHeld);
+  useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
+  useEffect(() => { isPTTHeldRef.current = isPTTHeld; }, [isPTTHeld]);
+  // Always-current callback ref — avoids stale closure in setInterval
+  const runDwellRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  runDwellRef.current = async () => {
+    if (isProcessingRef.current || isPTTHeldRef.current) return;
+    let frame: string | null = null;
+    try { frame = await Wearables.captureCurrentFrame(); } catch { return; }
+    if (!frame) return;
+    try {
+      const resp = await fetch(`${BACKEND_URL}/dwell_check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ frame }),
+      });
+      const data = await resp.json();
+      const hash: string = data.hash ?? '';
+      if (!hash) return;
 
+      if (!dwellAnchor.current) {
+        dwellAnchor.current = hash;
+        dwellScore.current = 1.0;
+        return;
+      }
+
+      const dist = hammingDistance(hash, dwellAnchor.current);
+
+      if (dist < DWELL_HASH_THRESHOLD) {
+        dwellScore.current = Math.min(dwellScore.current + DWELL_MATCH_WEIGHT, DWELL_TRIGGER_SCORE + 1);
+        dwellCandidate.current = null;
+        dwellCandidateStreak.current = 0;
+      } else {
+        dwellScore.current = Math.max(dwellScore.current + DWELL_MISS_WEIGHT, 0);
+        if (
+          dwellCandidate.current === null ||
+          hammingDistance(hash, dwellCandidate.current) >= DWELL_HASH_THRESHOLD
+        ) {
+          dwellCandidate.current = hash;
+          dwellCandidateStreak.current = 1;
+        } else {
+          dwellCandidateStreak.current += 1;
+          if (dwellCandidateStreak.current >= DWELL_CANDIDATE_STREAK) {
+            dwellAnchor.current = dwellCandidate.current;
+            dwellScore.current = 1.0;
+            dwellCandidate.current = null;
+            dwellCandidateStreak.current = 0;
+          }
+        }
+      }
+
+      if (dwellScore.current >= DWELL_TRIGGER_SCORE) {
+        dwellScore.current = 0;
+        const msg = "Still here? Need help finding anything?";
+        addCaptureMessage('assistant', msg);
+        try { Tts.speak(msg); } catch {}
+      }
+    } catch {}
+  };
+
+  // TTS init
+  useEffect(() => {
+    try { Tts.setDefaultLanguage('en-US'); } catch {}
+    return () => { try { Tts.stop(); } catch {} };
+  }, []);
+
+  // Voice recognition handlers
+  useEffect(() => {
+    Voice.onSpeechResults = (e: SpeechResultsEvent) => {
+      if (e.value && e.value.length > 0) {
+        transcriptRef.current = e.value[0];
+      }
+    };
+    Voice.onSpeechError = (_e: SpeechErrorEvent) => {
+      // Don't reset isPTTHeld — let the user release the button.
+      // Just stop processing if it was in flight.
+      setIsProcessing(false);
+    };
+    return () => { Voice.destroy().then(() => Voice.removeAllListeners()); };
+  }, []);
+
+  // Glasses stream
   useEffect(() => {
     const sub = wearablesEmitter.addListener('onStreamStateChange', ({ state }) => {
       setStreamState(state as StreamState);
@@ -58,49 +197,35 @@ export default function LiveCaptureScreen() {
     return () => sub.remove();
   }, []);
 
-  const stopCaptureLoop = () => {
-    if (captureLoopRef.current) {
-      clearInterval(captureLoopRef.current);
-      captureLoopRef.current = null;
-    }
-    setIsCapturing(false);
-  };
-
-  const sendFrame = useCallback(async () => {
-    let base64: string;
-    try { base64 = await Wearables.captureCurrentFrame(); }
-    catch { return; }
-
-    const itemNames = items.map(i => i.name);
-    if (itemNames.length === 0) return;
-
-    const t0 = Date.now();
-    try {
-      const resp = await fetch(`${BACKEND_URL}/detect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, items: itemNames, session_id: sessionIdRef.current }),
-      });
-      const data = await resp.json();
-      setLastLatency(Date.now() - t0);
-      setFrameCount(n => n + 1);
-      setLastError(null);
-      if (data.session_id) setSessionId(data.session_id);
-      for (const det of data.detections) {
-        updateDetection(det.item, { brand: det.brand, matched: det.matched, confidence: det.confidence, product: det.product });
+  // Start/stop dwell polling based on stream state
+  useEffect(() => {
+    if (streamState === 'streaming') {
+      dwellTimerRef.current = setInterval(() => { runDwellRef.current?.(); }, DWELL_POLL_MS);
+    } else {
+      if (dwellTimerRef.current) {
+        clearInterval(dwellTimerRef.current);
+        dwellTimerRef.current = null;
       }
-    } catch (e: any) {
-      setLastError(e.message ?? 'Network error');
+      dwellScore.current = 0;
+      dwellAnchor.current = null;
+      dwellCandidate.current = null;
+      dwellCandidateStreak.current = 0;
     }
-  }, [items, setSessionId, updateDetection]);
+    return () => {
+      if (dwellTimerRef.current) {
+        clearInterval(dwellTimerRef.current);
+        dwellTimerRef.current = null;
+      }
+    };
+  }, [streamState]);
 
-  const startCaptureLoop = useCallback(() => {
-    if (captureLoopRef.current) return;
-    setIsCapturing(true);
-    captureLoopRef.current = setInterval(sendFrame, CAPTURE_INTERVAL_MS);
-  }, [sendFrame]);
+  // Auto-scroll on new messages
+  useEffect(() => {
+    if (captureMessages.length > 0) {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [captureMessages.length]);
 
-  // Start/stop stream when tab is focused/unfocused
   useFocusEffect(
     useCallback(() => {
       const init = async () => {
@@ -114,162 +239,346 @@ export default function LiveCaptureScreen() {
             didGrantPermission = true;
           }
           await Wearables.startStream();
-        } catch (e: any) {
-          setLastError(e.message);
-        }
+        } catch {}
       };
       init();
       return () => {
-        stopCaptureLoop();
         Wearables.stopStream().catch(() => {});
         setStreamState('stopped');
-        setIsCapturing(false);
+        Voice.cancel().catch(() => {});
+        try { Tts.stop(); } catch {}
+        if (dwellTimerRef.current) {
+          clearInterval(dwellTimerRef.current);
+          dwellTimerRef.current = null;
+        }
       };
     }, [])
   );
 
-  useEffect(() => {
-    if (streamState === 'streaming' && !isCapturing) startCaptureLoop();
-  }, [streamState, isCapturing, startCaptureLoop]);
+  const sendToBackend = async (transcription: string) => {
+    let frame: string | null = null;
+    try { frame = await Wearables.captureCurrentFrame(); } catch {}
 
-  useEffect(() => {
-    if (isCapturing) {
-      stopCaptureLoop();
-      captureLoopRef.current = setInterval(sendFrame, CAPTURE_INTERVAL_MS);
-      setIsCapturing(true);
-    }
-  }, [sendFrame]);
+    const body: Record<string, any> = { transcription };
+    if (frame) body.frame = frame;
+    if (storeMap) body.store_map = storeMap;
 
-  const handleGoToChat = () => {
-    stopCaptureLoop();
-    navigation.navigate('Chat');
+    const resp = await fetch(`${BACKEND_URL}/vision_chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    return data.response as string;
   };
 
-  const detectedCount = items.filter(i => i.status === 'detected').length;
-  const notFoundItems = items.filter(i => i.status === 'not_found');
+  const handlePTTStart = () => {
+    if (isProcessing) return;
+    transcriptRef.current = '';
+    setIsPTTHeld(true);
+    setCaptureMode('active');
+    try { Tts.stop(); } catch {}
+    Voice.start('en-US').catch(() => {});
+  };
+
+  const handlePTTEnd = async () => {
+    if (!isPTTHeld) return;
+    setIsPTTHeld(false);
+    setIsProcessing(true);
+
+    try {
+      await Voice.stop();
+    } catch {}
+
+    // Give voice recognition a moment to finalize
+    await new Promise<void>(r => setTimeout(r, 400));
+
+    const transcription = transcriptRef.current.trim();
+    if (!transcription) {
+      setIsProcessing(false);
+      return;
+    }
+
+    addCaptureMessage('user', transcription);
+    dwellScore.current = 0;
+
+    try {
+      const response = await sendToBackend(transcription);
+      addCaptureMessage('assistant', response);
+      try { Tts.speak(response); } catch {}
+    } catch {
+      addCaptureMessage('assistant', "Sorry, I couldn't reach the server. Please try again.");
+    }
+
+    setIsProcessing(false);
+  };
+
+  const handleFeedback = (id: string, feedback: 'up' | 'down') => {
+    setCaptureFeedback(id, feedback);
+    if (feedback === 'up') {
+      endCaptureSession();
+      try { Tts.stop(); } catch {}
+    }
+  };
+
+  const glassesConnected = streamState === 'streaming';
+
+  const pttLabel = isProcessing
+    ? 'Processing...'
+    : isPTTHeld
+    ? 'Listening...'
+    : 'Hold to talk';
 
   return (
     <View style={styles.container}>
-      {/* Camera preview */}
-      <View style={styles.preview}>
-        {streamState === 'streaming' ? (
-          <StreamPreviewView style={StyleSheet.absoluteFill} />
-        ) : (
-          <View style={styles.waitingBox}>
-            <ActivityIndicator color="#fff" size="large" />
-            <Text style={styles.waitingText}>{streamState}</Text>
-          </View>
-        )}
-        {/* Overlay */}
-        <View style={styles.overlayRow}>
-          {isCapturing && (
-            <View style={styles.liveBadge}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText}>LIVE</Text>
-            </View>
-          )}
-          <View style={{ flex: 1 }} />
-          {lastLatency !== null && (
-            <Text style={styles.latencyText}>{lastLatency}ms</Text>
-          )}
+      {/* Status bar */}
+      <View style={styles.statusBar}>
+        <View style={styles.glassesStatus}>
+          <View style={[styles.statusDot, glassesConnected && styles.statusDotConnected]} />
+          <Text style={[styles.statusText, glassesConnected && styles.statusTextConnected]}>
+            {glassesConnected ? 'Glasses connected' : 'Connecting...'}
+          </Text>
         </View>
+        <Text style={styles.modeLabel}>{captureMode === 'active' ? 'Active' : 'Passive'}</Text>
       </View>
 
-      {/* HUD */}
-      <View style={styles.hud}>
-        <Text style={styles.scanStatus}>
-          {isCapturing
-            ? `Scanning every 3s · frame ${frameCount}`
-            : streamState === 'streaming' ? 'Starting scan...' : streamState}
-        </Text>
-
-        {lastError && <Text style={styles.errorText}>⚠ {lastError}</Text>}
-
-        <Text style={styles.sectionLabel}>IDENTIFIED</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-          {items.map(item => (
-            <View key={item.id} style={[styles.chip, { backgroundColor: CHIP_BG[item.status], borderColor: CHIP_BORDER[item.status] }]}>
-              <Text style={styles.chipName}>{item.name}</Text>
-              {item.detectedBrand
-                ? <Text style={styles.chipBrand}>{item.detectedBrand}</Text>
-                : <Text style={styles.chipStatus}>{item.status === 'pending' ? '...' : item.status}</Text>
-              }
-            </View>
-          ))}
-        </ScrollView>
-
-        {notFoundItems.length > 0 && (
-          <View style={styles.notFoundRow}>
-            <Text style={styles.notFoundText}>
-              ! {notFoundItems.map(i => i.name).join(', ')} — not found yet
-            </Text>
-          </View>
+      {/* Conversation */}
+      <ScrollView
+        ref={scrollRef}
+        style={styles.messageList}
+        contentContainerStyle={styles.messageListContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {captureMessages.length === 0 && (
+          <Text style={styles.emptyHint}>
+            Point your glasses at a shelf. The assistant will check in if you dwell.
+          </Text>
         )}
+        {captureMessages.map((msg) =>
+          msg.role === 'assistant' ? (
+            <AssistantBubble key={msg.id} msg={msg} onFeedback={handleFeedback} />
+          ) : (
+            <UserBubble key={msg.id} msg={msg} />
+          )
+        )}
+      </ScrollView>
 
-        <View style={styles.btnRow}>
-          <Pressable style={styles.stopBtn} onPress={() => { stopCaptureLoop(); Wearables.stopStream().catch(() => {}); setStreamState('stopped'); }}>
-            <Text style={styles.stopBtnText}>■  Stop</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.chatBtn, detectedCount === 0 && styles.chatBtnDisabled]}
-            onPress={handleGoToChat}
-            disabled={detectedCount === 0}
-          >
-            <Text style={styles.chatBtnText}>Go to chat →</Text>
-          </Pressable>
-        </View>
+      <BarcodeScanScreen
+        visible={showBarcodeScanner}
+        onClose={() => setShowBarcodeScanner(false)}
+      />
+
+      {/* Bottom bar */}
+      <View style={styles.bottomBar}>
+        <Pressable style={styles.barcodeBtn} onPress={() => setShowBarcodeScanner(true)}>
+          <Text style={styles.barcodeBtnText}>▦</Text>
+        </Pressable>
+        <Pressable
+          style={[
+            styles.pttBtn,
+            isPTTHeld && styles.pttBtnActive,
+            isProcessing && styles.pttBtnProcessing,
+          ]}
+          onPressIn={handlePTTStart}
+          onPressOut={handlePTTEnd}
+          disabled={isProcessing}
+        >
+          <Text style={[styles.pttBtnText, (isPTTHeld || isProcessing) && styles.pttBtnTextActive]}>
+            {pttLabel}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container:       { flex: 1, backgroundColor: '#0f0f0f' },
-  preview:         { flex: 1, backgroundColor: '#000', position: 'relative' },
-  waitingBox:      { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  waitingText:     { color: '#555', fontSize: 13 },
-  overlayRow: {
-    position: 'absolute', top: 16, left: 16, right: 16,
-    flexDirection: 'row', alignItems: 'center',
+  container: {
+    flex: 1,
+    backgroundColor: '#111',
+    paddingTop: 52,
   },
-  liveBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 20,
-    paddingHorizontal: 10, paddingVertical: 4,
+  statusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#2a2a2a',
   },
-  liveDot:         { width: 6, height: 6, borderRadius: 3, backgroundColor: '#ef4444' },
-  liveText:        { color: '#fff', fontSize: 11, fontWeight: '700' },
-  latencyText: {
-    color: 'rgba(255,255,255,0.6)', fontSize: 11,
-    backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 8,
-    paddingVertical: 2, borderRadius: 10,
+  glassesStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  hud:             { backgroundColor: '#111', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
-  scanStatus:      { color: '#888', fontSize: 12, marginBottom: 10 },
-  errorText:       { color: '#fca5a5', fontSize: 12, marginBottom: 8 },
-  sectionLabel:    { color: '#555', fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
-  chipRow:         { flexGrow: 0, marginBottom: 10 },
-  chip: {
-    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
-    marginRight: 8, borderWidth: 1, minWidth: 90,
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#444',
   },
-  chipName:        { color: '#fff', fontSize: 13, fontWeight: '600', textTransform: 'capitalize' },
-  chipBrand:       { color: '#86efac', fontSize: 11, marginTop: 2 },
-  chipStatus:      { color: '#888', fontSize: 11, marginTop: 2 },
-  notFoundRow: {
-    backgroundColor: '#2d0a0a', borderRadius: 8, padding: 10, marginBottom: 10,
+  statusDotConnected: {
+    backgroundColor: '#22c55e',
   },
-  notFoundText:    { color: '#fca5a5', fontSize: 12 },
-  btnRow:          { flexDirection: 'row', gap: 10, paddingBottom: 12 },
-  stopBtn: {
-    flex: 1, height: 46, backgroundColor: '#1f2937', borderRadius: 12,
-    justifyContent: 'center', alignItems: 'center',
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#555',
   },
-  stopBtnText:     { color: '#fff', fontSize: 14, fontWeight: '600' },
-  chatBtn: {
-    flex: 2, height: 46, backgroundColor: '#16a34a', borderRadius: 12,
-    justifyContent: 'center', alignItems: 'center',
+  statusTextConnected: {
+    color: '#fff',
   },
-  chatBtnDisabled: { backgroundColor: '#1a2e1a', opacity: 0.5 },
-  chatBtnText:     { color: '#fff', fontSize: 14, fontWeight: '700' },
+  modeLabel: {
+    fontSize: 14,
+    color: '#888',
+  },
+  messageList: {
+    flex: 1,
+  },
+  messageListContent: {
+    padding: 16,
+    gap: 16,
+    flexGrow: 1,
+  },
+  emptyHint: {
+    color: '#444',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 40,
+    lineHeight: 22,
+    paddingHorizontal: 24,
+  },
+  bubbleGroup: {
+    gap: 8,
+  },
+  assistantBubbleWrap: {
+    alignItems: 'flex-start',
+    maxWidth: '78%',
+    gap: 6,
+  },
+  bubbleLabel: {
+    fontSize: 11,
+    color: '#555',
+    paddingLeft: 2,
+  },
+  bubbleLabelRight: {
+    fontSize: 11,
+    color: '#555',
+    paddingRight: 2,
+    alignSelf: 'flex-end',
+  },
+  assistantBubble: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 16,
+    borderTopLeftRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  assistantBubbleText: {
+    color: '#fff',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  feedbackRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingLeft: 2,
+  },
+  feedbackBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1e1e1e',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  feedbackIcon: {
+    fontSize: 17,
+  },
+  feedbackGiven: {
+    fontSize: 17,
+    paddingLeft: 4,
+  },
+  sessionEndRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  sessionEndLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#2a2a2a',
+  },
+  sessionEndText: {
+    fontSize: 11,
+    color: '#444',
+  },
+  userBubbleWrap: {
+    alignItems: 'flex-end',
+    alignSelf: 'flex-end',
+    maxWidth: '78%',
+    gap: 6,
+  },
+  userBubble: {
+    backgroundColor: '#2d4a7a',
+    borderRadius: 16,
+    borderTopRightRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  userBubbleText: {
+    color: '#fff',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  bottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    paddingBottom: 28,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#2a2a2a',
+  },
+  barcodeBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#1e1e1e',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  barcodeBtnText: {
+    fontSize: 22,
+    color: '#888',
+  },
+  pttBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#1e3a6e',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pttBtnActive: {
+    backgroundColor: '#1d4ed8',
+  },
+  pttBtnProcessing: {
+    backgroundColor: '#1e3a6e',
+    opacity: 0.7,
+  },
+  pttBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7aa7e0',
+  },
+  pttBtnTextActive: {
+    color: '#fff',
+  },
 });

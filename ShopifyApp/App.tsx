@@ -32,6 +32,11 @@ export default function App() {
         }}
       >
         <Tab.Screen
+          name="Chat"
+          component={ChatScreen}
+          options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>💬</Text> }}
+        />
+        <Tab.Screen
           name="List"
           component={ShoppingListScreen}
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>☰</Text> }}
@@ -40,11 +45,6 @@ export default function App() {
           name="Capture"
           component={LiveCaptureScreen}
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>◉</Text> }}
-        />
-        <Tab.Screen
-          name="Chat"
-          component={ChatScreen}
-          options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>💬</Text> }}
         />
       </Tab.Navigator>
     </NavigationContainer>

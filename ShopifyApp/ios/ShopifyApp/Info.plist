@@ -91,5 +91,11 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Upload a store map image to help with in-store navigation.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hold to talk uses the microphone to transcribe your question.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Hold to talk uses speech recognition to understand your question.</string>
 </dict>
 </plist>

@@ -3,3 +3,7 @@ uvicorn
 openai
 rapidfuzz
 python-dotenv
+pillow
+zxing-cpp
+numpy
+requests
