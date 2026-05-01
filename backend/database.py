@@ -65,6 +65,13 @@ def get_scanned_product(barcode: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
+def clear_scanned_products() -> None:
+    conn = get_db()
+    conn.execute("DELETE FROM scanned_products")
+    conn.commit()
+    conn.close()
+
+
 def get_all_scanned_products() -> list[dict]:
     conn = get_db()
     rows = conn.execute(

@@ -8,6 +8,7 @@ class WearablesModule: RCTEventEmitter {
   private var session: StreamSession?
   private var stateToken: Any?
   private var photoToken: Any?
+  private var pendingPhotoResolve: RCTPromiseResolveBlock?
 
   override static func requiresMainQueueSetup() -> Bool { true }
 
@@ -67,6 +68,8 @@ class WearablesModule: RCTEventEmitter {
     photoToken = session.photoDataPublisher.listen { [weak self] photoData in
       let base64 = photoData.data.base64EncodedString()
       self?.sendEvent(withName: "onPhotoCapture", body: ["data": base64])
+      self?.pendingPhotoResolve?(base64)
+      self?.pendingPhotoResolve = nil
     }
 
     Task { await session.start() }
@@ -94,8 +97,8 @@ class WearablesModule: RCTEventEmitter {
       reject("NO_SESSION", "Stream is not active. Call startStream first.", nil)
       return
     }
+    pendingPhotoResolve = resolve
     session.capturePhoto(format: .jpeg)
-    resolve(nil)
   }
 
   // MARK: - Frame Capture

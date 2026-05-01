@@ -21,6 +21,7 @@
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.24.0",
     "react-native-tts": "^4.1.1",
+    "react-native-vision-camera": "^4.7.3",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

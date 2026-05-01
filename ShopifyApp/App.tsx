@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -14,7 +14,13 @@ export type RootTabParamList = {
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
+const BACKEND_URL = 'http://192.168.0.252:8080';
+
 export default function App() {
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/scanned_products`, { method: 'DELETE' }).catch(() => {});
+  }, []);
+
   return (
     <NavigationContainer>
       <Tab.Navigator

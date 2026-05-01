@@ -16,7 +16,7 @@ export default {
   stopStream: (): Promise<void> =>
     WearablesModule.stopStream(),
 
-  capturePhoto: (): Promise<void> =>
+  capturePhoto: (): Promise<string> =>
     WearablesModule.capturePhoto(),
 
   captureCurrentFrame: (): Promise<string> =>

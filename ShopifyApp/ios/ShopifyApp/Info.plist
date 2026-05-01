@@ -57,6 +57,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to scan product barcodes</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Needed to connect to Meta Ray-Ban glasses</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

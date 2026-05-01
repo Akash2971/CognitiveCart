@@ -61,7 +61,7 @@
 
 1. **Navigation** — Guide user to the right aisle using a store map loaded into context
 2. **Product narrowing** — AI sees shelf from frame, asks user to scan a few specific items rather than guessing all products ("Lots of options here. Any size or brand preference, or want to scan a few?")
-3. **Barcode scanning** — Scan a product barcode for nutritional facts; manual price entry field included
+3. **Barcode scanning** — Scan a product barcode using the iPad camera; product info pulled from Open Food Facts; manual price entry per product
 4. **Comparison** — Compare scanned products on price, size, nutrition
 
 > For CL types not covered by these actions, AI responds that the request is out of scope.
@@ -131,3 +131,18 @@
   - Barcode scan icon (left, circular) — opens barcode scanner
   - **Hold to talk** (large blue button, right) — PTT voice input
 - Tabs: Chat | List | **Capture**
+
+---
+
+### Barcode Scanner — Full Screen Modal ✅
+
+- Opens from barcode icon on Capture tab
+- **List view** (default): shows all products scanned this session, or empty state if none
+  - Header: "Scanned products" + session count
+  - Each card: product name, brand · size, editable price field (synced to backend on blur)
+  - Buttons: **Done** | **Start scanning** / **+ Scan another**
+- **Scanning view**: full-screen iPad camera with blue targeting box overlay
+  - Barcode detected on-device via iOS Vision framework (no image sent to server)
+  - Immediately looks up barcode via `GET /lookup_barcode/{barcode}` → Open Food Facts API
+- **Session behaviour**: list cleared on app launch; deduplication within session
+- **Backend**: `scanned_products` table in SQLite; `GET /scanned_products`, `GET /lookup_barcode/{barcode}`, `PATCH /scanned_products/{barcode}/price`, `DELETE /scanned_products`

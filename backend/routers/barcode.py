@@ -4,11 +4,10 @@ import json
 
 import requests
 import zxingcpp
-import numpy as np
 from fastapi import APIRouter, HTTPException
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 
-from database import get_scanned_product, update_scanned_price, upsert_scanned_product
+from database import clear_scanned_products, get_all_scanned_products, get_scanned_product, update_scanned_price, upsert_scanned_product
 from models import (
     BarcodeScanRequest,
     BarcodeScanResponse,
@@ -67,11 +66,39 @@ def _normalize(barcode: str, product: dict) -> ScannedProduct:
     )
 
 
+def _zxing(img: Image.Image, binarizer=zxingcpp.Binarizer.LocalAverage) -> str | None:
+    results = zxingcpp.read_barcodes(img, binarizer=binarizer)
+    return results[0].text if results else None
+
+
+def _candidates(img: Image.Image) -> list[Image.Image]:
+    w, h = img.size
+    gray = img.convert("L")
+    boosted = ImageEnhance.Contrast(gray).enhance(2.5)
+    sharp = boosted.filter(ImageFilter.SHARPEN)
+
+    # Upscale 2x — critical for low-res glasses stream frames
+    up2 = sharp.resize((w * 2, h * 2), Image.LANCZOS)
+
+    # Center 60% crop then upscale — barcode occupies small portion of wide-angle frame
+    cx, cy = int(w * 0.2), int(h * 0.2)
+    crop = sharp.crop((cx, cy, w - cx, h - cy))
+    cw, ch = crop.size
+    crop_up = crop.resize((cw * 2, ch * 2), Image.LANCZOS)
+
+    return [gray, boosted, sharp, up2, crop, crop_up]
+
+
 def _read_barcode(b64: str) -> str | None:
     img_bytes = base64.b64decode(b64)
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    results = zxingcpp.read_barcodes(np.array(img))
-    return results[0].text if results else None
+
+    for candidate in _candidates(img):
+        for binarizer in (zxingcpp.Binarizer.LocalAverage, zxingcpp.Binarizer.GlobalHistogram):
+            result = _zxing(candidate, binarizer)
+            if result:
+                return result
+    return None
 
 
 @router.post("/scan_barcode", response_model=BarcodeScanResponse)
@@ -141,6 +168,72 @@ def scan_barcode(req: BarcodeScanRequest):
             success=False,
             message=f"Product not found (barcode: {barcode})."
         )
+
+    product = _normalize(barcode, data["product"])
+    upsert_scanned_product(barcode, product.model_dump())
+    return BarcodeScanResponse(success=True, product=product)
+
+
+@router.delete("/scanned_products")
+def delete_scanned_products():
+    clear_scanned_products()
+    return {"ok": True}
+
+
+@router.get("/scanned_products")
+def list_scanned_products():
+    rows = get_all_scanned_products()
+    return [{"barcode": r["barcode"], "name": r["name"], "brand": r.get("brand"), "size": r.get("size"), "price": r.get("price")} for r in rows]
+
+
+@router.get("/lookup_barcode/{barcode}", response_model=BarcodeScanResponse)
+def lookup_barcode(barcode: str):
+    cached = get_scanned_product(barcode)
+    if cached:
+        product = ScannedProduct(
+            barcode=barcode,
+            name=cached["name"],
+            brand=cached.get("brand"),
+            size=cached.get("size"),
+            serving=cached.get("serving"),
+            nutriscore=cached.get("nutriscore"),
+            nova=cached.get("nova"),
+            ingredients=cached.get("ingredients"),
+            allergens=json.loads(cached.get("allergens") or "[]"),
+            labels=json.loads(cached.get("labels") or "[]"),
+            categories=json.loads(cached.get("categories") or "[]"),
+            nutrition_per_100g=NutritionPer100g(
+                calories=cached.get("calories"),
+                fat=cached.get("fat"),
+                saturated_fat=cached.get("saturated_fat"),
+                carbs=cached.get("carbs"),
+                sugars=cached.get("sugars"),
+                fiber=cached.get("fiber"),
+                protein=cached.get("protein"),
+                salt=cached.get("salt"),
+                sodium=cached.get("sodium"),
+            ),
+        )
+        return BarcodeScanResponse(success=True, product=product)
+
+    try:
+        resp = requests.get(
+            OFF_URL.format(barcode=barcode),
+            params={"fields": OFF_FIELDS},
+            headers=OFF_HEADERS,
+            timeout=8,
+        )
+    except requests.RequestException:
+        return BarcodeScanResponse(success=False, message="Couldn't reach the product database.")
+
+    if resp.status_code == 429:
+        return BarcodeScanResponse(success=False, message="Rate limited. Try again in a moment.")
+    if resp.status_code >= 500:
+        return BarcodeScanResponse(success=False, message="Product database is unavailable.")
+
+    data = resp.json()
+    if data.get("status") != 1:
+        return BarcodeScanResponse(success=False, message=f"Product not found (barcode: {barcode}).")
 
     product = _normalize(barcode, data["product"])
     upsert_scanned_product(barcode, product.model_dump())
