@@ -92,7 +92,7 @@
 
 ### Chat Tab — Planning (at home)
 
-![Chat tab](~/.claude/image-cache/a738d6d4-00ef-48cd-a004-6681e729f127/2.png)
+![Chat tab](uiscreens/chat_tab.png)
 
 - Greeting: "Hi! What are you shopping for today?"
 - User types in the **Message...** input at the bottom; send arrow on the right
@@ -104,7 +104,7 @@
 
 ### List Tab — Shopping List
 
-![List tab](~/.claude/image-cache/a738d6d4-00ef-48cd-a004-6681e729f127/5.png)
+![List tab](uiscreens/list_tab.png)
 
 - **Header**: "Shopping list" (left) | progress counter "3 of 7" (right)
 - Items are **inferred from the Chat tab only** — the AI populates the list as the user builds it through conversation
@@ -119,8 +119,7 @@
 
 ### Capture Tab — Vision Mode (in-store)
 
-![Capture tab](~/.claude/image-cache/a738d6d4-00ef-48cd-a004-6681e729f127/3.png)
-![Capture tab — active exchange](~/.claude/image-cache/a738d6d4-00ef-48cd-a004-6681e729f127/4.png)
+![Capture tab — active exchange](uiscreens/capture_tab_active.png)
 
 - **Top bar**: 🟢 "Glasses connected" (left) | mode label "Passive" / "Active" (right)
 - **Chat area**: shows the assistant–user exchange
