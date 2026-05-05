@@ -179,7 +179,6 @@ export default function ChatScreen() {
     m => m.proposals && m.proposals.length > 0 && !m.proposalResolved
   );
   const inputBlocked = !!activeSuggestionMsg || !!activeProposalMsg;
-  console.log('[DEBUG] activeSuggestionMsg:', activeSuggestionMsg?.id, activeSuggestionMsg?.suggestions);
 
   useEffect(() => {
     if (messages.length === 0) {

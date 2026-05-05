@@ -19,6 +19,7 @@ const BACKEND_URL = 'http://192.168.0.252:8080';
 export default function App() {
   useEffect(() => {
     fetch(`${BACKEND_URL}/scanned_products`, { method: 'DELETE' }).catch(() => {});
+    fetch(`${BACKEND_URL}/agent_state`, { method: 'DELETE' }).catch(() => {});
   }, []);
 
   return (

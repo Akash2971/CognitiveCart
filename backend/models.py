@@ -65,8 +65,36 @@ class VisionChatResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
-# Dwell Detection (Capture tab — passive scene monitoring)
+# Passive Agent
 # --------------------------------------------------------------------------- #
+
+class PassiveFrameRequest(BaseModel):
+    frame: str  # base64 JPEG
+
+class PassiveFrameResponse(BaseModel):
+    updated_summary: str
+    updated_load_type: int
+    updated_confidence: float
+    intervene: bool
+    response: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- #
+# Active Agent
+# --------------------------------------------------------------------------- #
+
+class ActiveFrameRequest(BaseModel):
+    user_message: str
+    frame: Optional[str] = None
+    store_map: Optional[str] = None
+
+class ActiveFrameResponse(BaseModel):
+    response: str
+    suggested_action: Optional[str] = None  # "navigate" or "scan"
+    updated_summary: str
+    updated_load_type: int
+    updated_confidence: float
+
 
 # --------------------------------------------------------------------------- #
 # Barcode Scan
@@ -107,14 +135,3 @@ class BarcodeScanResponse(BaseModel):
 
 class UpdatePriceRequest(BaseModel):
     price: float
-
-
-# --------------------------------------------------------------------------- #
-# Dwell Detection (Capture tab — passive scene monitoring)
-# --------------------------------------------------------------------------- #
-
-class DwellCheckRequest(BaseModel):
-    frame: str   # base64 JPEG from glasses
-
-class DwellCheckResponse(BaseModel):
-    hash: str    # 64-bit dHash string, empty string on failure

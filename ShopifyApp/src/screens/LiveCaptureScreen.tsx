@@ -14,19 +14,7 @@ import { useShoppingStore, type CaptureMessage } from '../store/shoppingStore';
 import BarcodeScanScreen from './BarcodeScanScreen';
 
 const BACKEND_URL = 'http://192.168.0.252:8080';
-
-const DWELL_POLL_MS = 2000;
-const DWELL_MATCH_WEIGHT = 1.0;
-const DWELL_MISS_WEIGHT = -0.4;
-const DWELL_TRIGGER_SCORE = 5.0;    // anchor(+1) + 4 matches × 2s = ~10s
-const DWELL_HASH_THRESHOLD = 20;    // Hamming distance < 20 = same scene (out of 64 bits)
-const DWELL_CANDIDATE_STREAK = 2;   // consecutive matches needed to swap anchor
-
-function hammingDistance(a: string, b: string): number {
-  let d = 0;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++;
-  return d;
-}
+const PASSIVE_POLL_MS = 3000;
 
 let didRegister = false;
 let didGrantPermission = false;
@@ -97,80 +85,68 @@ export default function LiveCaptureScreen() {
   const [isPTTHeld, setIsPTTHeld] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = React.useState(false);
+  const [loadType, setLoadType] = React.useState(0);
+  const [confidence, setConfidence] = React.useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const transcriptRef = useRef<string>('');
 
-  // Dwell detection refs
-  const dwellScore = useRef(0);
-  const dwellAnchor = useRef<string | null>(null);
-  const dwellCandidate = useRef<string | null>(null);
-  const dwellCandidateStreak = useRef(0);
-  const dwellTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Stable refs so the interval callback always sees current state
+  // Passive agent refs
+  const passiveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const passiveInFlightRef = useRef(false);
+  const modeResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Stable refs so interval callbacks always see current state
   const isProcessingRef = useRef(isProcessing);
   const isPTTHeldRef = useRef(isPTTHeld);
   useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
   useEffect(() => { isPTTHeldRef.current = isPTTHeld; }, [isPTTHeld]);
-  // Always-current callback ref — avoids stale closure in setInterval
-  const runDwellRef = useRef<(() => Promise<void>) | undefined>(undefined);
-  runDwellRef.current = async () => {
-    if (isProcessingRef.current || isPTTHeldRef.current) return;
+
+  const storeMapRef = useRef(storeMap);
+  useEffect(() => { storeMapRef.current = storeMap; }, [storeMap]);
+
+  // Always-current passive callback — avoids stale closure in setInterval
+  const runPassiveRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  runPassiveRef.current = async () => {
+    if (
+      passiveInFlightRef.current ||
+      isProcessingRef.current ||
+      isPTTHeldRef.current
+    ) return;
+
     let frame: string | null = null;
     try { frame = await Wearables.captureCurrentFrame(); } catch { return; }
     if (!frame) return;
+
+    passiveInFlightRef.current = true;
     try {
-      const resp = await fetch(`${BACKEND_URL}/dwell_check`, {
+      const resp = await fetch(`${BACKEND_URL}/passive_frame`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ frame }),
       });
       const data = await resp.json();
-      const hash: string = data.hash ?? '';
-      if (!hash) return;
 
-      if (!dwellAnchor.current) {
-        dwellAnchor.current = hash;
-        dwellScore.current = 1.0;
-        return;
+      // Always update indicator on every passive call
+      setLoadType(data.updated_load_type ?? 0);
+      setConfidence(data.updated_confidence ?? 0);
+
+      if (data.intervene && data.response) {
+        addCaptureMessage('assistant', data.response);
+        try { Tts.speak(data.response); } catch {}
       }
-
-      const dist = hammingDistance(hash, dwellAnchor.current);
-
-      if (dist < DWELL_HASH_THRESHOLD) {
-        dwellScore.current = Math.min(dwellScore.current + DWELL_MATCH_WEIGHT, DWELL_TRIGGER_SCORE + 1);
-        dwellCandidate.current = null;
-        dwellCandidateStreak.current = 0;
-      } else {
-        dwellScore.current = Math.max(dwellScore.current + DWELL_MISS_WEIGHT, 0);
-        if (
-          dwellCandidate.current === null ||
-          hammingDistance(hash, dwellCandidate.current) >= DWELL_HASH_THRESHOLD
-        ) {
-          dwellCandidate.current = hash;
-          dwellCandidateStreak.current = 1;
-        } else {
-          dwellCandidateStreak.current += 1;
-          if (dwellCandidateStreak.current >= DWELL_CANDIDATE_STREAK) {
-            dwellAnchor.current = dwellCandidate.current;
-            dwellScore.current = 1.0;
-            dwellCandidate.current = null;
-            dwellCandidateStreak.current = 0;
-          }
-        }
-      }
-
-      if (dwellScore.current >= DWELL_TRIGGER_SCORE) {
-        dwellScore.current = 0;
-        const msg = "Still here? Need help finding anything?";
-        addCaptureMessage('assistant', msg);
-        try { Tts.speak(msg); } catch {}
-      }
-    } catch {}
+    } catch {
+      // silently skip failed passive frames
+    } finally {
+      passiveInFlightRef.current = false;
+    }
   };
 
   // TTS init
   useEffect(() => {
     try { Tts.setDefaultLanguage('en-US'); } catch {}
+    Tts.addEventListener('tts-start', () => {});
+    Tts.addEventListener('tts-finish', () => {});
+    Tts.addEventListener('tts-progress', () => {});
     return () => { try { Tts.stop(); } catch {} };
   }, []);
 
@@ -182,14 +158,12 @@ export default function LiveCaptureScreen() {
       }
     };
     Voice.onSpeechError = (_e: SpeechErrorEvent) => {
-      // Don't reset isPTTHeld — let the user release the button.
-      // Just stop processing if it was in flight.
       setIsProcessing(false);
     };
     return () => { Voice.destroy().then(() => Voice.removeAllListeners()); };
   }, []);
 
-  // Glasses stream
+  // Glasses stream state
   useEffect(() => {
     const sub = wearablesEmitter.addListener('onStreamStateChange', ({ state }) => {
       setStreamState(state as StreamState);
@@ -197,24 +171,29 @@ export default function LiveCaptureScreen() {
     return () => sub.remove();
   }, []);
 
-  // Start/stop dwell polling based on stream state
+  // Start/stop passive polling based on stream state
   useEffect(() => {
     if (streamState === 'streaming') {
-      dwellTimerRef.current = setInterval(() => { runDwellRef.current?.(); }, DWELL_POLL_MS);
+      startPassivePolling();
     } else {
-      if (dwellTimerRef.current) {
-        clearInterval(dwellTimerRef.current);
-        dwellTimerRef.current = null;
+      if (passiveTimerRef.current) {
+        clearInterval(passiveTimerRef.current);
+        passiveTimerRef.current = null;
       }
-      dwellScore.current = 0;
-      dwellAnchor.current = null;
-      dwellCandidate.current = null;
-      dwellCandidateStreak.current = 0;
+      if (modeResumeTimerRef.current) {
+        clearTimeout(modeResumeTimerRef.current);
+        modeResumeTimerRef.current = null;
+      }
+      passiveInFlightRef.current = false;
     }
     return () => {
-      if (dwellTimerRef.current) {
-        clearInterval(dwellTimerRef.current);
-        dwellTimerRef.current = null;
+      if (passiveTimerRef.current) {
+        clearInterval(passiveTimerRef.current);
+        passiveTimerRef.current = null;
+      }
+      if (modeResumeTimerRef.current) {
+        clearTimeout(modeResumeTimerRef.current);
+        modeResumeTimerRef.current = null;
       }
     };
   }, [streamState]);
@@ -247,70 +226,114 @@ export default function LiveCaptureScreen() {
         setStreamState('stopped');
         Voice.cancel().catch(() => {});
         try { Tts.stop(); } catch {}
-        if (dwellTimerRef.current) {
-          clearInterval(dwellTimerRef.current);
-          dwellTimerRef.current = null;
+        if (passiveTimerRef.current) {
+          clearInterval(passiveTimerRef.current);
+          passiveTimerRef.current = null;
         }
+        if (modeResumeTimerRef.current) {
+          clearTimeout(modeResumeTimerRef.current);
+          modeResumeTimerRef.current = null;
+        }
+        passiveInFlightRef.current = false;
       };
     }, [])
   );
 
-  const sendToBackend = async (transcription: string) => {
+  const callActiveAgent = async (transcription: string) => {
     let frame: string | null = null;
     try { frame = await Wearables.captureCurrentFrame(); } catch {}
 
-    const body: Record<string, any> = { transcription };
+    const body: Record<string, any> = { user_message: transcription };
     if (frame) body.frame = frame;
-    if (storeMap) body.store_map = storeMap;
+    if (storeMapRef.current) body.store_map = storeMapRef.current;
 
-    const resp = await fetch(`${BACKEND_URL}/vision_chat`, {
+    const resp = await fetch(`${BACKEND_URL}/active_frame`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await resp.json();
-    return data.response as string;
+    return await resp.json();
+  };
+
+  const stopPassivePolling = () => {
+    if (passiveTimerRef.current) {
+      clearInterval(passiveTimerRef.current);
+      passiveTimerRef.current = null;
+    }
+    if (modeResumeTimerRef.current) {
+      clearTimeout(modeResumeTimerRef.current);
+      modeResumeTimerRef.current = null;
+    }
+  };
+
+  const startPassivePolling = () => {
+    if (passiveTimerRef.current) return;
+    passiveTimerRef.current = setInterval(
+      () => { runPassiveRef.current?.(); },
+      PASSIVE_POLL_MS,
+    );
+    setCaptureMode('passive');
+  };
+
+  const schedulePassiveResume = () => {
+    if (modeResumeTimerRef.current) clearTimeout(modeResumeTimerRef.current);
+    modeResumeTimerRef.current = setTimeout(() => {
+      modeResumeTimerRef.current = null;
+      startPassivePolling();
+    }, 20_000);
   };
 
   const handlePTTStart = () => {
     if (isProcessing) return;
     transcriptRef.current = '';
+    isPTTHeldRef.current = true;
     setIsPTTHeld(true);
+    stopPassivePolling();
     setCaptureMode('active');
     try { Tts.stop(); } catch {}
     Voice.start('en-US').catch(() => {});
   };
 
   const handlePTTEnd = async () => {
-    if (!isPTTHeld) return;
+    if (!isPTTHeldRef.current) return;
+    isPTTHeldRef.current = false;
     setIsPTTHeld(false);
     setIsProcessing(true);
 
-    try {
-      await Voice.stop();
-    } catch {}
+    try { await Voice.stop(); } catch {}
 
-    // Give voice recognition a moment to finalize
     await new Promise<void>(r => setTimeout(r, 400));
 
     const transcription = transcriptRef.current.trim();
     if (!transcription) {
       setIsProcessing(false);
+      schedulePassiveResume();
       return;
     }
 
     addCaptureMessage('user', transcription);
-    dwellScore.current = 0;
 
     try {
-      const response = await sendToBackend(transcription);
+      const data = await callActiveAgent(transcription);
+      const response: string = data.response ?? '';
+      const action: string | null = data.suggested_action ?? null;
+
+      // Always update indicator on every active call
+      setLoadType(data.updated_load_type ?? 0);
+      setConfidence(data.updated_confidence ?? 0);
+
       addCaptureMessage('assistant', response);
       try { Tts.speak(response); } catch {}
+
+      if (action) {
+        console.log('[CognitiveCart] suggested_action:', action);
+      }
     } catch {
       addCaptureMessage('assistant', "Sorry, I couldn't reach the server. Please try again.");
     }
 
     setIsProcessing(false);
+    schedulePassiveResume();
   };
 
   const handleFeedback = (id: string, feedback: 'up' | 'down') => {
@@ -322,6 +345,16 @@ export default function LiveCaptureScreen() {
   };
 
   const glassesConnected = streamState === 'streaming';
+
+  const LOAD_LABELS: Record<number, string> = {
+    0: 'No load',
+    1: 'Search',
+    2: 'Comparison',
+    3: 'Choice overload',
+    4: 'Comprehension',
+  };
+
+  const confidenceColor = confidence >= 0.7 ? '#ef4444' : confidence >= 0.4 ? '#f59e0b' : '#22c55e';
 
   const pttLabel = isProcessing
     ? 'Processing...'
@@ -339,6 +372,11 @@ export default function LiveCaptureScreen() {
             {glassesConnected ? 'Glasses connected' : 'Connecting...'}
           </Text>
         </View>
+        <View style={styles.loadIndicator}>
+          <View style={[styles.loadDot, { backgroundColor: confidenceColor }]} />
+          <Text style={styles.loadLabel}>{LOAD_LABELS[loadType] ?? 'No load'}</Text>
+          <Text style={styles.loadConf}>{Math.round(confidence * 100)}%</Text>
+        </View>
         <Text style={styles.modeLabel}>{captureMode === 'active' ? 'Active' : 'Passive'}</Text>
       </View>
 
@@ -351,7 +389,7 @@ export default function LiveCaptureScreen() {
       >
         {captureMessages.length === 0 && (
           <Text style={styles.emptyHint}>
-            Point your glasses at a shelf. The assistant will check in if you dwell.
+            Point your glasses at a shelf. The assistant will check in when it detects you need help.
           </Text>
         )}
         {captureMessages.map((msg) =>
@@ -428,6 +466,29 @@ const styles = StyleSheet.create({
   },
   statusTextConnected: {
     color: '#fff',
+  },
+  loadIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  loadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  loadLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ccc',
+  },
+  loadConf: {
+    fontSize: 11,
+    color: '#666',
   },
   modeLabel: {
     fontSize: 14,
