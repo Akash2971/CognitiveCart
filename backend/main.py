@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import MODEL
-from routers import detect, chat, barcode, passive, active
+from routers import detect, chat, barcode, passive, active, store_map
 import agent_state
 
 app = FastAPI()
@@ -19,6 +19,7 @@ app.include_router(chat.router)
 app.include_router(barcode.router)
 app.include_router(passive.router)
 app.include_router(active.router)
+app.include_router(store_map.router)
 
 
 @app.delete("/agent_state")

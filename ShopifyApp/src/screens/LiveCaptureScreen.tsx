@@ -74,7 +74,6 @@ export default function LiveCaptureScreen() {
   const {
     captureMessages,
     captureMode,
-    storeMap,
     addCaptureMessage,
     setCaptureFeedback,
     endCaptureSession,
@@ -100,9 +99,6 @@ export default function LiveCaptureScreen() {
   const isPTTHeldRef = useRef(isPTTHeld);
   useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
   useEffect(() => { isPTTHeldRef.current = isPTTHeld; }, [isPTTHeld]);
-
-  const storeMapRef = useRef(storeMap);
-  useEffect(() => { storeMapRef.current = storeMap; }, [storeMap]);
 
   // Always-current passive callback — avoids stale closure in setInterval
   const runPassiveRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -245,7 +241,6 @@ export default function LiveCaptureScreen() {
 
     const body: Record<string, any> = { user_message: transcription };
     if (frame) body.frame = frame;
-    if (storeMapRef.current) body.store_map = storeMapRef.current;
 
     const resp = await fetch(`${BACKEND_URL}/active_frame`, {
       method: 'POST',
@@ -318,15 +313,14 @@ export default function LiveCaptureScreen() {
       const response: string = data.response ?? '';
       const action: string | null = data.suggested_action ?? null;
 
-      // Always update indicator on every active call
       setLoadType(data.updated_load_type ?? 0);
       setConfidence(data.updated_confidence ?? 0);
 
       addCaptureMessage('assistant', response);
       try { Tts.speak(response); } catch {}
 
-      if (action) {
-        console.log('[CognitiveCart] suggested_action:', action);
+      if (action === 'scan') {
+        setShowBarcodeScanner(true);
       }
     } catch {
       addCaptureMessage('assistant', "Sorry, I couldn't reach the server. Please try again.");

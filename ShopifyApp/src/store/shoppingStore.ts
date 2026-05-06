@@ -37,7 +37,8 @@ export interface CaptureMessage {
 interface ShoppingStore {
   items: ShoppingItem[];
   sessionId: string | null;
-  storeMap: string | null;
+  storeMap: string | null;        // base64 for preview display only
+  mapParsed: boolean;             // true once backend has parsed the map
   messages: ChatMessage[];
   captureMessages: CaptureMessage[];
   captureMode: 'passive' | 'active';
@@ -52,6 +53,7 @@ interface ShoppingStore {
   markNotFound: (itemName: string) => void;
   toggleCheck: (id: string) => void;
   setStoreMap: (base64: string | null) => void;
+  setMapParsed: (parsed: boolean) => void;
   setSessionId: (id: string) => void;
   resetDetections: () => void;
   addMessage: (role: 'user' | 'assistant', content: string, proposals?: string[], suggestions?: string[]) => void;
@@ -68,6 +70,7 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
   items: [],
   sessionId: null,
   storeMap: null,
+  mapParsed: false,
   messages: [],
   captureMessages: [],
   captureMode: 'passive',
@@ -119,6 +122,7 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
     })),
 
   setStoreMap: (base64) => set({ storeMap: base64 }),
+  setMapParsed: (parsed) => set({ mapParsed: parsed }),
 
   setSessionId: (id) => set({ sessionId: id }),
 

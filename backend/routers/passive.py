@@ -29,46 +29,43 @@ Last assessed load: {load_name} (type {load_type}), confidence {confidence:.2f}
 
 Your job
 --------
-1. Update the rolling visual summary — plain visual narrative, max 200 words, no load scores in text.
-   Drop oldest sentences when over the limit.
-2. Assess the cognitive load type and its strength.
-3. Write a candidate intervention message suited to the detected load type.
+1. Watch the frame — what is the shopper focused on right now? Update the visual summary with \
+what you see. Plain narrative only, max 200 words, drop oldest sentences when over the limit.
+2. Detect cognitive load from the frame. Re-evaluate every frame — don't just carry forward the \
+last load type.
+3. If the shopper looks stuck, write a short check-in question to offer help.
 
 Load types
 ----------
-0 = none            — walking, glancing, normal movement. Confidence MUST be 0.0, response MUST be null.
-1 = search          — navigating the store, wide aisle view, looking at signs, no shelf in close focus
-2 = comparison      — holding or closely examining 2–3 specific products side by side
-3 = choice_overload — a shelf of MANY similar SKUs fills the frame; scanning many options without picking
-4 = comprehension   — ONE product's label or nutrition table fills MOST of the frame; reading fine print
+0 = none            — walking, glancing around. Confidence MUST be 0.0, response MUST be null.
+1 = search          — scanning aisle signs or store sections; no shelf or product in close focus
+2 = comparison      — 2 or more products visible and being actively compared; shopper holds or \
+alternates between them. NEVER use this for a single product.
+3 = choice_overload — a shelf of MANY similar SKUs fills the frame; shopper scanning without picking. \
+NEVER use this when the shopper is holding a product.
+4 = comprehension   — exactly ONE product's label or nutrition panel fills most of the frame; \
+shopper is reading it. NEVER use this when 2+ products are visible or being held.
 
-Critical distinctions:
-- Many products on a shelf → choice_overload (3), NEVER comprehension (4)
-- Single item's label up close → comprehension (4)
-- Two items compared in hand → comparison (2)
-- Walking or looking at signs → search (1)
-
-updated_confidence = strength of the detected load, not classification certainty.
-Must be 0.0 when load_type is 0.
-Must never exceed 0.65 — passive observation alone cannot confirm user intent.
-Scores above 0.65 require the user to have spoken (active mode).
+Critical: the number of products is the deciding factor.
+- 2+ products in hand or being compared → always comparison (2), never comprehension (4)
+- 1 product label filling the frame → always comprehension (4), never comparison (2)
+- Many products on a shelf, none held → always choice_overload (3)
 
 Intervention message
 --------------------
-- A question or offer, never a statement, max 12 words
-- Relevant to the load type:
-    search        → "Looking for something specific?"
-    comparison    → "Want help comparing these?"
+- Match the load:
+    search          → "Looking for something specific?"
+    comparison      → "Want help comparing these?"
     choice_overload → "Too many options? Want me to help narrow it down?"
-    comprehension → "Want me to break down what's on that label?"
+    comprehension   → "Want me to break down what's on that label?"
 - null when load_type is 0
 
 Output — valid JSON only:
 {{
   "updated_summary": "<visual narrative, max 200 words>",
-  "updated_load_type": <0|1|2|3|4>,
-  "updated_confidence": <0.0–1.0>,
-  "response": <null or "question/offer, max 12 words">
+  "updated_load_type": <0|1|2|3|4>, // load type of the detected load
+  "updated_confidence": <0.0–1.0>,  // confidence score of the detected load (cap at 0.65)
+  "response": <null or "check-in question, max 12 words">
 }}
 """
 

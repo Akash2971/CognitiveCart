@@ -7,6 +7,7 @@ _state: dict = {
     "history": [],
     "last_intervention_time": 0.0,
     "last_intervention_load_type": 0,
+    "store_map_data": None,  # parsed map JSON, set once on upload
 }
 
 MAX_HISTORY = 10
@@ -47,6 +48,14 @@ def record_intervention(load_type: int):
     _state["last_intervention_load_type"] = load_type
 
 
+def set_store_map_data(data: dict):
+    _state["store_map_data"] = data
+
+
+def get_store_map_data() -> dict | None:
+    return _state["store_map_data"]
+
+
 def reset():
     _state["summary"] = ""
     _state["load_type"] = 0
@@ -54,3 +63,4 @@ def reset():
     _state["history"] = []
     _state["last_intervention_time"] = 0.0
     _state["last_intervention_load_type"] = 0
+    _state["store_map_data"] = None

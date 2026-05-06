@@ -42,18 +42,44 @@ function ItemRow({ item }: { item: ShoppingItem }) {
   );
 }
 
+const BACKEND_URL = 'http://192.168.0.252:8080';
+
 export default function ShoppingListScreen() {
-  const { items, addItem, storeMap, setStoreMap } = useShoppingStore();
+  const { items, addItem, storeMap, setStoreMap, mapParsed, setMapParsed } = useShoppingStore();
   const [showAdd, setShowAdd] = useState(false);
   const [addText, setAddText] = useState('');
   const [showMapModal, setShowMapModal] = useState(false);
+  const [mapUploading, setMapUploading] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
 
   const checkedCount = items.filter((i) => i.checked).length;
 
   const handleUploadMap = () => {
-    launchImageLibrary({ mediaType: 'photo', quality: 0.8, includeBase64: true }, (response) => {
-      if (response.assets && response.assets[0]?.base64) {
-        setStoreMap(response.assets[0].base64);
+    launchImageLibrary({ mediaType: 'photo', quality: 0.5, includeBase64: true, maxWidth: 1024, maxHeight: 1024 }, async (response) => {
+      const base64 = response.assets?.[0]?.base64;
+      if (!base64) return;
+
+      setStoreMap(base64);         // store for preview
+      setMapParsed(false);
+      setMapError(null);
+      setMapUploading(true);
+
+      try {
+        const res = await fetch(`${BACKEND_URL}/store_map`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64 }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setMapParsed(true);
+        } else {
+          setMapError(data.message ?? 'Failed to parse map.');
+        }
+      } catch {
+        setMapError('Could not reach the server.');
+      } finally {
+        setMapUploading(false);
       }
     });
   };
@@ -75,8 +101,8 @@ export default function ShoppingListScreen() {
             <Text style={styles.counter}>{checkedCount} of {items.length}</Text>
           )}
           <Pressable onPress={() => setShowMapModal(true)} hitSlop={12} style={styles.mapBtn}>
-            <Text style={styles.mapBtnText}>{storeMap ? '🗺' : '🗺'}</Text>
-            {storeMap && <View style={styles.mapDot} />}
+            <Text style={styles.mapBtnText}>🗺</Text>
+            {mapParsed && <View style={styles.mapDot} />}
           </Pressable>
         </View>
       </View>
@@ -88,7 +114,10 @@ export default function ShoppingListScreen() {
             {storeMap ? (
               <>
                 <Image source={{ uri: `data:image/jpeg;base64,${storeMap}` }} style={styles.mapPreview} resizeMode="contain" />
-                <Pressable style={styles.modalBtn} onPress={handleUploadMap}>
+                {mapUploading && <Text style={styles.modalHint}>Parsing map...</Text>}
+                {mapParsed && !mapUploading && <Text style={[styles.modalHint, { color: '#22c55e' }]}>Map ready — navigation enabled</Text>}
+                {mapError && <Text style={[styles.modalHint, { color: '#ef4444' }]}>{mapError}</Text>}
+                <Pressable style={styles.modalBtn} onPress={handleUploadMap} disabled={mapUploading}>
                   <Text style={styles.modalBtnText}>Replace map</Text>
                 </Pressable>
               </>
@@ -97,8 +126,10 @@ export default function ShoppingListScreen() {
                 <Text style={styles.modalHint}>
                   Upload a photo of the store map to enable aisle navigation.
                 </Text>
-                <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleUploadMap}>
-                  <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>Upload store map</Text>
+                <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleUploadMap} disabled={mapUploading}>
+                  <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>
+                    {mapUploading ? 'Parsing...' : 'Upload store map'}
+                  </Text>
                 </Pressable>
               </>
             )}

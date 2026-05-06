@@ -86,14 +86,42 @@ class PassiveFrameResponse(BaseModel):
 class ActiveFrameRequest(BaseModel):
     user_message: str
     frame: Optional[str] = None
-    store_map: Optional[str] = None
+
+class ActionCall(BaseModel):
+    name: str
+    args: dict = {}
 
 class ActiveFrameResponse(BaseModel):
     response: str
-    suggested_action: Optional[str] = None  # "navigate" or "scan"
+    suggested_action: Optional[str] = None       # passive load hint: "scan"
+    suggested_actions: list[ActionCall] = []     # tools pending user confirmation
     updated_summary: str
     updated_load_type: int
     updated_confidence: float
+
+
+# --------------------------------------------------------------------------- #
+# Navigate Action
+# --------------------------------------------------------------------------- #
+
+class NavigateRequest(BaseModel):
+    store_map: str              # base64 JPEG
+    frame: Optional[str] = None
+
+class NavigateResponse(BaseModel):
+    response: str               # spoken aisle directions
+
+
+# --------------------------------------------------------------------------- #
+# Store Map Upload
+# --------------------------------------------------------------------------- #
+
+class StoreMapUploadRequest(BaseModel):
+    image: str  # base64 JPEG
+
+class StoreMapUploadResponse(BaseModel):
+    success: bool
+    message: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
