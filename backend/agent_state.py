@@ -7,7 +7,8 @@ _state: dict = {
     "history": [],
     "last_intervention_time": 0.0,
     "last_intervention_load_type": 0,
-    "store_map_data": None,  # parsed map JSON, set once on upload
+    "store_map_data": None,
+    "pending_actions": [],
 }
 
 MAX_HISTORY = 10
@@ -56,6 +57,14 @@ def get_store_map_data() -> dict | None:
     return _state["store_map_data"]
 
 
+def set_pending_actions(actions: list):
+    _state["pending_actions"] = actions
+
+
+def get_pending_actions() -> list:
+    return _state["pending_actions"]
+
+
 def reset():
     _state["summary"] = ""
     _state["load_type"] = 0
@@ -64,3 +73,4 @@ def reset():
     _state["last_intervention_time"] = 0.0
     _state["last_intervention_load_type"] = 0
     _state["store_map_data"] = None
+    _state["pending_actions"] = []

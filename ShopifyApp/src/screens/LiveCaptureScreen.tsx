@@ -11,9 +11,9 @@ import Voice, { SpeechResultsEvent, SpeechErrorEvent } from '@react-native-voice
 import Tts from 'react-native-tts';
 import Wearables, { wearablesEmitter } from '../../WearablesModule';
 import { useShoppingStore, type CaptureMessage } from '../store/shoppingStore';
-import BarcodeScanScreen from './BarcodeScanScreen';
+import BarcodeScanScreen, { type MinimalProduct } from './BarcodeScanScreen';
 
-const BACKEND_URL = 'http://192.168.0.252:8080';
+import { BACKEND_URL } from '../config';
 const PASSIVE_POLL_MS = 3000;
 
 let didRegister = false;
@@ -84,6 +84,8 @@ export default function LiveCaptureScreen() {
   const [isPTTHeld, setIsPTTHeld] = React.useState(false);
   const [isProcessing, setIsProcessing] = React.useState(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = React.useState(false);
+  const [showCompareScan, setShowCompareScan] = React.useState(false);
+  const compareSummaryRef = useRef<string>('');
   const [loadType, setLoadType] = React.useState(0);
   const [confidence, setConfidence] = React.useState(0);
   const scrollRef = useRef<ScrollView>(null);
@@ -311,7 +313,7 @@ export default function LiveCaptureScreen() {
     try {
       const data = await callActiveAgent(transcription);
       const response: string = data.response ?? '';
-      const action: string | null = data.suggested_action ?? null;
+      const executeAction: string | null = data.execute_action ?? null;
 
       setLoadType(data.updated_load_type ?? 0);
       setConfidence(data.updated_confidence ?? 0);
@@ -319,8 +321,12 @@ export default function LiveCaptureScreen() {
       addCaptureMessage('assistant', response);
       try { Tts.speak(response); } catch {}
 
-      if (action === 'scan') {
-        setShowBarcodeScanner(true);
+      if (executeAction === 'scan_barcode') {
+        compareSummaryRef.current = data.updated_summary ?? '';
+        stopPassivePolling();
+        setShowCompareScan(true);
+        setIsProcessing(false);
+        return;
       }
     } catch {
       addCaptureMessage('assistant', "Sorry, I couldn't reach the server. Please try again.");
@@ -328,6 +334,28 @@ export default function LiveCaptureScreen() {
 
     setIsProcessing(false);
     schedulePassiveResume();
+  };
+
+  const handleCompareComplete = async (products: MinimalProduct[]) => {
+    setShowCompareScan(false);
+    if (products.length === 0) return;
+    try {
+      const resp = await fetch(`${BACKEND_URL}/product_info`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ products, context: compareSummaryRef.current || undefined }),
+      });
+      const data = await resp.json();
+      const spoken: string = data.spoken_response ?? '';
+      if (spoken) {
+        addCaptureMessage('assistant', spoken);
+        try { Tts.speak(spoken); } catch {}
+      }
+    } catch {
+      addCaptureMessage('assistant', "I couldn't analyse those products right now.");
+    } finally {
+      schedulePassiveResume();
+    }
   };
 
   const handleFeedback = (id: string, feedback: 'up' | 'down') => {
@@ -398,6 +426,12 @@ export default function LiveCaptureScreen() {
       <BarcodeScanScreen
         visible={showBarcodeScanner}
         onClose={() => setShowBarcodeScanner(false)}
+      />
+      <BarcodeScanScreen
+        visible={showCompareScan}
+        onClose={() => setShowCompareScan(false)}
+        mode="compare"
+        onCompareComplete={handleCompareComplete}
       />
 
       {/* Bottom bar */}

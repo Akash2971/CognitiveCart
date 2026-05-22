@@ -5,6 +5,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import ShoppingListScreen from './src/screens/ShoppingListScreen';
 import LiveCaptureScreen from './src/screens/LiveCaptureScreen';
 import ChatScreen from './src/screens/ChatScreen';
+import { BACKEND_URL } from './src/config';
 
 export type RootTabParamList = {
   List: undefined;
@@ -13,8 +14,6 @@ export type RootTabParamList = {
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
-
-const BACKEND_URL = 'http://192.168.0.252:8080';
 
 export default function App() {
   useEffect(() => {

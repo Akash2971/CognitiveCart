@@ -7,8 +7,10 @@ from openai import APIConnectionError, APIStatusError
 from agent_state import (
     LOAD_NAMES,
     add_to_history,
+    get_pending_actions,
     get_state,
     get_store_map_data,
+    set_pending_actions,
     update_summary_and_load,
 )
 from config import MODEL, client
@@ -32,6 +34,8 @@ Last assessed load: {load_name} (type {load_type}), confidence {confidence:.2f}
 
 Available tools: {tools_list}
 
+Pending user confirmation: {pending_actions}
+
 Your responsibilities
 --------
 1. Read the situation: use the frame, visual summary, and detected load to understand what the \
@@ -46,10 +50,13 @@ Tool rules
 - When confidence is below 0.7, ask clarifying questions instead of using a tool.
 - Use "execute_actions" for tools that fire immediately (no confirmation needed).
 - Use "suggested_actions" for tools marked "(ask user first)" — ask the user a yes/no question \
-in your response (e.g. "Want me to scan this?"), put the action in suggested_actions, and only \
-move it to "execute_actions" on the next turn if the user explicitly agrees.
+in your response (e.g. "Want me to scan this?"), put the action in suggested_actions.
+- If "Pending user confirmation" is non-empty and the user agrees, move those actions to \
+execute_actions immediately. If the user declines, leave both lists empty.
 - Each action: {{"name": "<tool>", "args": {{...}}}}. Include relevant args (e.g. {{"product": "wine"}}).
 - Never answer from your own knowledge what a tool is meant to provide.
+- If a product analysis or comparison result already appears in the conversation history, \
+answer follow-up questions from that result — do not suggest scanning again.
 
 Load types
 ----------
@@ -101,12 +108,12 @@ TOOL_SPECS: dict[str, dict] = {
         "kind": "response",
         "confirmation": False,
     },
-    # "scan_barcode": {
-    #     "description": "scan a product barcode to get price, nutrition, or details",
-    #     "args": [],
-    #     "kind": "action",
-    #     "confirmation": True,
-    # },
+    "scan_barcode": {
+        "description": "scan one or more product barcodes to get nutrition info or compare them",
+        "args": [],
+        "kind": "action",
+        "confirmation": True,
+    },
 }
 
 
@@ -154,19 +161,15 @@ def _handle_navigate(req: ActiveFrameRequest, summary: str, tool_args: dict) -> 
         return "I couldn't look up the map right now. Please ask a store employee."
 
 
+def _handle_scan_barcode(_req: ActiveFrameRequest, _summary: str, _tool_args: dict) -> str:
+    return "Sure, go ahead and scan the products."
+
+
 TOOL_HANDLERS: dict[str, Callable[[ActiveFrameRequest, str, dict], str]] = {
     "navigate": _handle_navigate,
+    "scan_barcode": _handle_scan_barcode,
 }
 
-
-# ── Load → suggested UI action ────────────────────────────────────────────── #
-
-def _action_for_load(load_type: int, confidence: float) -> str | None:
-    if load_type == 0 or confidence <= 0.7:
-        return None
-    if load_type in (2, 3, 4):
-        return "scan"
-    return None
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────────── #
@@ -187,6 +190,8 @@ def active_frame(req: ActiveFrameRequest):
         )
         if available_specs else "none"
     )
+    pending = get_pending_actions()
+    pending_str = ", ".join(a["name"] for a in pending if "name" in a) if pending else "none"
 
     system = ACTIVE_SYSTEM.format(
         summary=summary,
@@ -194,6 +199,7 @@ def active_frame(req: ActiveFrameRequest):
         load_type=load_type,
         confidence=confidence,
         tools_list=tools_list,
+        pending_actions=pending_str,
     )
 
     user_content: list = []
@@ -256,30 +262,32 @@ def active_frame(req: ActiveFrameRequest):
     for action in execute_actions:
         name = action.get("name")
         args = action.get("args") or {}
+        spec = available_specs.get(name, {})
         handler = TOOL_HANDLERS.get(name)
         if handler:
-            print(f"[TOOL] executing {name} args={args}")
-            tool_result = handler(req, new_summary, args)
-            print(f"[TOOL] result={tool_result!r}")
+            print(f"[TOOL] executing {name} kind={spec.get('kind')} args={args}")
+            spoken = handler(req, new_summary, args)
+            print(f"[TOOL] result={spoken!r}")
+            set_pending_actions([])
             update_summary_and_load(new_summary, new_load, new_conf)
             add_to_history("user", req.user_message)
-            add_to_history("assistant", tool_result)
+            add_to_history("assistant", spoken)
             return ActiveFrameResponse(
-                response=tool_result,
+                response=spoken,
+                execute_action=name if spec.get("kind") == "action" else None,
                 updated_summary=new_summary,
                 updated_load_type=new_load,
                 updated_confidence=new_conf,
             )
 
     # ── Normal response (pass suggested_actions to frontend) ───────────────── #
-    passive_action = _action_for_load(new_load, new_conf)
+    set_pending_actions(suggested_actions)
     update_summary_and_load(new_summary, new_load, new_conf)
     add_to_history("user", req.user_message)
     add_to_history("assistant", response_text)
 
     return ActiveFrameResponse(
         response=response_text,
-        suggested_action=passive_action,
         suggested_actions=[ActionCall(name=a["name"], args=a.get("args") or {}) for a in suggested_actions if "name" in a],
         updated_summary=new_summary,
         updated_load_type=new_load,

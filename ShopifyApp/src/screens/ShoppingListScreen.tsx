@@ -42,7 +42,7 @@ function ItemRow({ item }: { item: ShoppingItem }) {
   );
 }
 
-const BACKEND_URL = 'http://192.168.0.252:8080';
+import { BACKEND_URL } from '../config';
 
 export default function ShoppingListScreen() {
   const { items, addItem, storeMap, setStoreMap, mapParsed, setMapParsed } = useShoppingStore();

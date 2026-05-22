@@ -95,9 +95,40 @@ class ActiveFrameResponse(BaseModel):
     response: str
     suggested_action: Optional[str] = None       # passive load hint: "scan"
     suggested_actions: list[ActionCall] = []     # tools pending user confirmation
+    execute_action: Optional[str] = None         # confirmed tool action for frontend to trigger
     updated_summary: str
     updated_load_type: int
     updated_confidence: float
+
+
+# --------------------------------------------------------------------------- #
+# Product Info / Compare
+# --------------------------------------------------------------------------- #
+
+class MinimalProduct(BaseModel):
+    name: str
+    brand: Optional[str] = None
+    nutriscore: Optional[str] = None
+    nova: Optional[int] = None
+    calories: Optional[float] = None
+    fat: Optional[float] = None
+    saturated_fat: Optional[float] = None
+    sugars: Optional[float] = None
+    protein: Optional[float] = None
+    salt: Optional[float] = None
+
+class ProductSummary(BaseModel):
+    name: str
+    summary: str
+
+class ProductInfoRequest(BaseModel):
+    products: list[MinimalProduct]
+    context: Optional[str] = None  # optional hint: what the user was trying to do
+
+class ProductInfoResponse(BaseModel):
+    products: list[ProductSummary]
+    comparison: Optional[str] = None  # null when only 1 product
+    spoken_response: str              # TTS-ready, added to agent history
 
 
 # --------------------------------------------------------------------------- #

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useShoppingStore, type ChatMessage } from '../store/shoppingStore';
 
-const BACKEND_URL = 'http://192.168.0.252:8080';
+import { BACKEND_URL } from '../config';
 
 // --------------------------------------------------------------------------- //
 // ProposalCard
