@@ -34,6 +34,12 @@ export interface CaptureMessage {
   sessionEnd?: boolean;
 }
 
+export interface UserProfile {
+  goals: string[];
+  restrictions: string[];
+  priorities: string[];
+}
+
 interface ShoppingStore {
   items: ShoppingItem[];
   sessionId: string | null;
@@ -42,6 +48,7 @@ interface ShoppingStore {
   messages: ChatMessage[];
   captureMessages: CaptureMessage[];
   captureMode: 'passive' | 'active';
+  userProfile: UserProfile;
   addItem: (name: string) => void;
   removeItem: (id: string) => void;
   updateDetection: (itemName: string, det: {
@@ -64,6 +71,7 @@ interface ShoppingStore {
   setCaptureFeedback: (id: string, feedback: 'up' | 'down') => void;
   endCaptureSession: () => void;
   setCaptureMode: (mode: 'passive' | 'active') => void;
+  setUserProfile: (profile: UserProfile) => void;
 }
 
 export const useShoppingStore = create<ShoppingStore>((set) => ({
@@ -74,6 +82,7 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
   messages: [],
   captureMessages: [],
   captureMode: 'passive',
+  userProfile: { goals: [], restrictions: [], priorities: [] },
 
   addItem: (name) =>
     set((state) => {
@@ -186,4 +195,6 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
     }),
 
   setCaptureMode: (mode) => set({ captureMode: mode }),
+
+  setUserProfile: (profile) => set({ userProfile: profile }),
 }));

@@ -194,3 +194,76 @@ class BarcodeScanResponse(BaseModel):
 
 class UpdatePriceRequest(BaseModel):
     price: float
+
+
+# --------------------------------------------------------------------------- #
+# User Profile
+# --------------------------------------------------------------------------- #
+
+class UserProfile(BaseModel):
+    goals: list[str] = []
+    restrictions: list[str] = []
+    priorities: list[str] = []
+
+
+# --------------------------------------------------------------------------- #
+# PTT — Main Agent
+# --------------------------------------------------------------------------- #
+
+class PTTRequest(BaseModel):
+    user_message: str
+    history: list[ChatMessage] = []
+
+class PTTResponse(BaseModel):
+    response: str
+
+
+# --------------------------------------------------------------------------- #
+# Shelf Scan — Start Assistance
+# --------------------------------------------------------------------------- #
+
+class DetectedProduct(BaseModel):
+    name: str
+    brand: str
+    in_db: str = "uncertain"  # "found" | "uncertain"
+
+class ShelfScanRequest(BaseModel):
+    frames: list[str]  # base64 JPEGs
+
+class ShelfScanResponse(BaseModel):
+    category: str                        # detected category or "other"
+    detected_products: list[DetectedProduct]
+    recommendation: str
+    winner: Optional[str] = None         # exact product name from DB
+    fallback_level: int                  # 1 = full DB recommendation, 2 = category known, 3 = unknown
+    spoken: str
+
+
+# --------------------------------------------------------------------------- #
+# Barcode Analysis
+# --------------------------------------------------------------------------- #
+
+class BarcodeAnalyzeRequest(BaseModel):
+    products: list[MinimalProduct]
+
+class BarcodeAnalyzeResponse(BaseModel):
+    verdict: str          # "take" | "skip" | "consider"
+    winner: Optional[str] = None
+    reason: str
+    spoken: str
+
+
+# --------------------------------------------------------------------------- #
+# Store Location
+# --------------------------------------------------------------------------- #
+
+class StoreLocation(BaseModel):
+    category: str
+    aisle: str
+    landmarks: Optional[str] = None
+
+class LocationResponse(BaseModel):
+    category: str
+    aisle: str
+    landmarks: Optional[str] = None
+    spoken: str

@@ -46,6 +46,20 @@ class WearablesModule: RCTEventEmitter {
     }
   }
 
+  @objc func checkCameraPermission(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    Task {
+      do {
+        let status = try await Wearables.shared.checkPermissionStatus(.camera)
+        resolve("\(status)")
+      } catch {
+        reject("PERMISSION_ERROR", error.localizedDescription, error)
+      }
+    }
+  }
+
   // MARK: - Streaming
 
   @objc func startStream(

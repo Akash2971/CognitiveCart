@@ -7,6 +7,9 @@ export default {
   startRegistration: (): Promise<void> =>
     WearablesModule.startRegistration(),
 
+  checkCameraPermission: (): Promise<string> =>
+    WearablesModule.checkCameraPermission?.() ?? Promise.resolve('unknown'),
+
   requestCameraPermission: (): Promise<string> =>
     WearablesModule.requestCameraPermission(),
 
