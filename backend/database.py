@@ -125,8 +125,12 @@ def init_new_tables() -> None:
             calories REAL, protein REAL, fat REAL,
             saturated_fat REAL, sugars REAL, fiber REAL,
             sodium REAL, carbs REAL,
-            tags TEXT DEFAULT '[]',
-            search_keywords TEXT DEFAULT '[]'
+            nutriscore TEXT,
+            nova INTEGER,
+            allergens TEXT DEFAULT '[]',
+            labels TEXT DEFAULT '[]',
+            barcode TEXT,
+            serving_size TEXT
         );
         CREATE TABLE IF NOT EXISTS store_locations (
             category TEXT PRIMARY KEY,

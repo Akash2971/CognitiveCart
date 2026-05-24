@@ -1,218 +1,192 @@
-"""
-Run once to populate catalog and store_locations tables.
-Usage: python seed_catalog.py
-"""
-import json
-import sqlite3
-import os
+#!/usr/bin/env python3
+"""Seed catalog from barcode images folder. Scans images → fetches full OFF data → inserts into DB.
+Re-run safely: progress is checkpointed to seed_progress.json so only failed items are retried."""
+import os, json, requests, time, sqlite3
+from routers.barcode import _read_barcode
 
-DB_PATH = os.getenv("DB_PATH", "products.db")
+BASE = "barcode images"
+DB_PATH = "products.db"
+PROGRESS_FILE = "seed_progress.json"
+OFF_URL = "https://world.openfoodfacts.org/api/v2/product/{}"
+OFF_FIELDS = "product_name,brands,serving_size,nutriments,nutriscore_grade,nova_group,allergens_tags,labels_tags"
+OFF_HEADERS = {"User-Agent": "CognitiveCart/0.1 (akash29701@gmail.com)"}
 
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-CATALOG = [
-    # ── Yogurt ────────────────────────────────────────────────────────────── #
-    {"name": "Plain Greek Yogurt 0%", "brand": "Chobani", "category": "yogurt",
-     "calories": 59, "protein": 10, "fat": 0, "saturated_fat": 0,
-     "sugars": 4, "fiber": 0, "sodium": 41, "carbs": 4,
-     "tags": ["high-protein", "low-fat", "low-sugar"],
-     "search_keywords": ["chobani", "plain", "greek", "nonfat"]},
-
-    {"name": "Total 0% Plain Greek Yogurt", "brand": "Fage", "category": "yogurt",
-     "calories": 59, "protein": 10, "fat": 0, "saturated_fat": 0,
-     "sugars": 4, "fiber": 0, "sodium": 45, "carbs": 4,
-     "tags": ["high-protein", "low-fat", "minimal-ingredients"],
-     "search_keywords": ["fage", "total", "plain", "greek", "nonfat"]},
-
-    {"name": "Triple Zero Vanilla Greek Yogurt", "brand": "Oikos", "category": "yogurt",
-     "calories": 60, "protein": 10, "fat": 0, "saturated_fat": 0,
-     "sugars": 0, "fiber": 0, "sodium": 50, "carbs": 7,
-     "tags": ["high-protein", "zero-sugar", "low-fat"],
-     "search_keywords": ["oikos", "triple", "zero", "vanilla", "greek"]},
-
-    {"name": "Plain Nonfat Skyr", "brand": "Siggi's", "category": "yogurt",
-     "calories": 67, "protein": 11, "fat": 0, "saturated_fat": 0,
-     "sugars": 3, "fiber": 0, "sodium": 50, "carbs": 5,
-     "tags": ["high-protein", "low-sugar", "minimal-ingredients", "icelandic"],
-     "search_keywords": ["siggi", "plain", "nonfat", "skyr", "icelandic"]},
-
-    {"name": "Strawberry Lowfat Yogurt", "brand": "Yoplait", "category": "yogurt",
-     "calories": 100, "protein": 3, "fat": 1.5, "saturated_fat": 1,
-     "sugars": 15, "fiber": 0, "sodium": 80, "carbs": 18,
-     "tags": ["low-protein", "high-sugar"],
-     "search_keywords": ["yoplait", "strawberry", "lowfat", "original"]},
-
-    # ── Cereal ────────────────────────────────────────────────────────────── #
-    {"name": "Original Cheerios", "brand": "General Mills", "category": "cereal",
-     "calories": 375, "protein": 13, "fat": 6, "saturated_fat": 1,
-     "sugars": 5, "fiber": 10, "sodium": 250, "carbs": 73,
-     "tags": ["low-sugar", "whole-grain", "heart-healthy"],
-     "search_keywords": ["cheerios", "original", "general mills", "oat"]},
-
-    {"name": "Original Special K", "brand": "Kellogg's", "category": "cereal",
-     "calories": 375, "protein": 17, "fat": 1, "saturated_fat": 0,
-     "sugars": 15, "fiber": 4, "sodium": 500, "carbs": 78,
-     "tags": ["high-protein", "low-fat"],
-     "search_keywords": ["special k", "kellogg", "original", "rice"]},
-
-    {"name": "Go Lean Crunch Cereal", "brand": "Kashi", "category": "cereal",
-     "calories": 357, "protein": 26, "fat": 4, "saturated_fat": 0,
-     "sugars": 10, "fiber": 19, "sodium": 214, "carbs": 57,
-     "tags": ["high-protein", "high-fiber", "low-fat", "whole-grain"],
-     "search_keywords": ["kashi", "go lean", "crunch", "protein", "fiber"]},
-
-    {"name": "Frosted Mini-Wheats", "brand": "Kellogg's", "category": "cereal",
-     "calories": 367, "protein": 10, "fat": 1, "saturated_fat": 0,
-     "sugars": 20, "fiber": 9, "sodium": 5, "carbs": 80,
-     "tags": ["high-fiber", "whole-grain", "high-sugar"],
-     "search_keywords": ["frosted", "mini wheats", "kellogg", "wheat"]},
-
-    {"name": "Original Bran Flakes", "brand": "Post", "category": "cereal",
-     "calories": 355, "protein": 10, "fat": 2, "saturated_fat": 0,
-     "sugars": 14, "fiber": 17, "sodium": 430, "carbs": 73,
-     "tags": ["high-fiber", "low-fat", "whole-grain"],
-     "search_keywords": ["bran flakes", "post", "original", "bran"]},
-
-    # ── Cooking Oil ───────────────────────────────────────────────────────── #
-    {"name": "Extra Virgin Olive Oil", "brand": "Pompeian", "category": "cooking_oil",
-     "calories": 884, "protein": 0, "fat": 100, "saturated_fat": 14,
-     "sugars": 0, "fiber": 0, "sodium": 0, "carbs": 0,
-     "tags": ["heart-healthy", "antioxidants", "mediterranean"],
-     "search_keywords": ["pompeian", "extra virgin", "olive oil", "evoo"]},
-
-    {"name": "100% Pure Avocado Oil", "brand": "Chosen Foods", "category": "cooking_oil",
-     "calories": 884, "protein": 0, "fat": 100, "saturated_fat": 11,
-     "sugars": 0, "fiber": 0, "sodium": 0, "carbs": 0,
-     "tags": ["heart-healthy", "high-smoke-point", "refined"],
-     "search_keywords": ["chosen foods", "avocado oil", "pure", "refined"]},
-
-    {"name": "Pure Vegetable Oil", "brand": "Crisco", "category": "cooking_oil",
-     "calories": 884, "protein": 0, "fat": 100, "saturated_fat": 7,
-     "sugars": 0, "fiber": 0, "sodium": 0, "carbs": 0,
-     "tags": ["budget-friendly", "neutral-flavor", "high-smoke-point"],
-     "search_keywords": ["crisco", "vegetable oil", "pure", "soybean"]},
-
-    {"name": "Organic Virgin Coconut Oil", "brand": "Nutiva", "category": "cooking_oil",
-     "calories": 862, "protein": 0, "fat": 100, "saturated_fat": 90,
-     "sugars": 0, "fiber": 0, "sodium": 0, "carbs": 0,
-     "tags": ["high-saturated-fat", "organic", "medium-chain-triglycerides"],
-     "search_keywords": ["nutiva", "coconut oil", "organic", "virgin"]},
-
-    {"name": "100% Pure Olive Oil", "brand": "Kirkland", "category": "cooking_oil",
-     "calories": 884, "protein": 0, "fat": 100, "saturated_fat": 14,
-     "sugars": 0, "fiber": 0, "sodium": 0, "carbs": 0,
-     "tags": ["heart-healthy", "budget-friendly"],
-     "search_keywords": ["kirkland", "pure olive oil", "costco", "signature"]},
-
-    # ── Protein Shake ─────────────────────────────────────────────────────── #
-    {"name": "Core Power Elite 42g Protein", "brand": "Fairlife", "category": "protein_shake",
-     "calories": 71, "protein": 13, "fat": 2, "saturated_fat": 1,
-     "sugars": 2.5, "fiber": 0, "sodium": 60, "carbs": 5,
-     "tags": ["ultra-high-protein", "low-sugar", "real-milk", "lactose-free"],
-     "search_keywords": ["fairlife", "core power", "elite", "42g", "protein"]},
-
-    {"name": "Chocolate Shake 30g Protein", "brand": "Premier Protein", "category": "protein_shake",
-     "calories": 49, "protein": 9.2, "fat": 0.9, "saturated_fat": 0.3,
-     "sugars": 1.5, "fiber": 0.3, "sodium": 130, "carbs": 3.1,
-     "tags": ["high-protein", "low-sugar", "low-calorie"],
-     "search_keywords": ["premier protein", "chocolate", "shake", "30g"]},
-
-    {"name": "Genuine Chocolate Protein Shake", "brand": "Muscle Milk", "category": "protein_shake",
-     "calories": 46, "protein": 7.7, "fat": 1.4, "saturated_fat": 0.5,
-     "sugars": 0.6, "fiber": 0, "sodium": 86, "carbs": 2.8,
-     "tags": ["high-protein", "low-sugar", "low-carb"],
-     "search_keywords": ["muscle milk", "genuine", "chocolate", "protein"]},
-
-    {"name": "Dark Chocolate Plant Protein Shake", "brand": "OWYN", "category": "protein_shake",
-     "calories": 55, "protein": 6.2, "fat": 2.2, "saturated_fat": 0.3,
-     "sugars": 1.5, "fiber": 1.8, "sodium": 105, "carbs": 5,
-     "tags": ["vegan", "plant-based", "high-protein", "allergen-free"],
-     "search_keywords": ["owyn", "dark chocolate", "plant protein", "vegan"]},
-
-    {"name": "Organic Protein Chocolate Shake", "brand": "Orgain", "category": "protein_shake",
-     "calories": 46, "protein": 8, "fat": 1.5, "saturated_fat": 0.5,
-     "sugars": 0, "fiber": 0, "sodium": 92, "carbs": 3.1,
-     "tags": ["organic", "plant-based", "zero-sugar", "high-protein"],
-     "search_keywords": ["orgain", "organic", "chocolate", "plant protein", "zero sugar"]},
-]
-
-STORE_LOCATIONS = [
-    {"category": "yogurt",        "aisle": "Aisle 12",        "landmarks": "Near the back-left wall, next to milk"},
-    {"category": "cereal",        "aisle": "Aisle 5",         "landmarks": "Center of the store, left side"},
-    {"category": "cooking_oil",   "aisle": "Aisle 8",         "landmarks": "Next to pasta sauces and condiments"},
-    {"category": "protein_shake", "aisle": "Aisle 3",         "landmarks": "Natural foods section near the entrance"},
-]
+FOLDER_TO_CATEGORY = {
+    "yogurt":      "yogurt",
+    "milk":        "milk",
+    "cheese":      "cheese",
+    "jam":         "jam",
+    "cereals":     "cereal",
+    "granola":     "granola",
+    "pasta_sauce": "pasta_sauce",
+}
 
 
-def seed():
-    conn = get_db()
+def scan_image(path):
+    """Decode barcode directly via zxingcpp — no network call."""
+    with open(path, "rb") as f:
+        data = f.read()
+    import base64
+    b64 = base64.b64encode(data).decode()
+    barcode = _read_barcode(b64)
+    return {"barcode": barcode}
 
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS catalog (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            brand TEXT NOT NULL,
-            category TEXT NOT NULL,
-            calories REAL, protein REAL, fat REAL,
-            saturated_fat REAL, sugars REAL, fiber REAL,
-            sodium REAL, carbs REAL,
-            tags TEXT DEFAULT '[]',
-            search_keywords TEXT DEFAULT '[]'
-        );
-        CREATE TABLE IF NOT EXISTS store_locations (
-            category TEXT PRIMARY KEY,
-            aisle TEXT NOT NULL,
-            landmarks TEXT
-        );
-        CREATE TABLE IF NOT EXISTS user_profile (
-            id INTEGER PRIMARY KEY DEFAULT 1,
-            goals TEXT DEFAULT '[]',
-            restrictions TEXT DEFAULT '[]',
-            priorities TEXT DEFAULT '[]'
-        );
-        INSERT OR IGNORE INTO user_profile (id) VALUES (1);
-    """)
 
-    for p in CATALOG:
-        existing = conn.execute(
-            "SELECT id FROM catalog WHERE LOWER(name)=LOWER(?) AND LOWER(brand)=LOWER(?)",
-            (p["name"], p["brand"])
-        ).fetchone()
-        if not existing:
-            conn.execute(
-                """INSERT INTO catalog
-                   (name, brand, category, calories, protein, fat, saturated_fat,
-                    sugars, fiber, sodium, carbs, tags, search_keywords)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    p["name"], p["brand"], p["category"],
-                    p["calories"], p["protein"], p["fat"], p["saturated_fat"],
-                    p["sugars"], p["fiber"], p["sodium"], p["carbs"],
-                    json.dumps(p["tags"]), json.dumps(p["search_keywords"]),
-                ),
-            )
-            print(f"  + {p['brand']} {p['name']}")
+def fetch_off(barcode):
+    resp = requests.get(OFF_URL.format(barcode), params={"fields": OFF_FIELDS},
+                        headers=OFF_HEADERS, timeout=10)
+    if not resp.content:
+        return None
+    return resp.json()
+
+
+def strip_prefix(tags, prefix="en:"):
+    return [t[len(prefix):] for t in tags if t.startswith(prefix)]
+
+
+def load_progress():
+    if os.path.exists(PROGRESS_FILE):
+        with open(PROGRESS_FILE) as f:
+            return json.load(f)
+    return {"barcodes": {}, "products": [], "failed_off": []}
+
+
+def save_progress(progress):
+    with open(PROGRESS_FILE, "w") as f:
+        json.dump(progress, f, indent=2)
+
+
+# ── Load existing progress ────────────────────────────────────────────────── #
+progress = load_progress()
+seen_barcodes = progress["barcodes"]   # barcode -> category
+products = progress["products"]         # fully fetched products
+failed_off = set(progress["failed_off"])  # barcodes that failed OFF fetch
+
+if seen_barcodes:
+    print(f"Resuming: {len(seen_barcodes)} barcodes already scanned, "
+          f"{len(products)} products fetched, {len(failed_off)} OFF failures\n")
+
+# ── Step 1: Scan images, collect unique barcodes ──────────────────────────── #
+print("=== Step 1: Scanning images ===\n")
+
+for folder, category in FOLDER_TO_CATEGORY.items():
+    folder_path = os.path.join(BASE, folder)
+    if not os.path.isdir(folder_path):
+        continue
+    images = sorted(f for f in os.listdir(folder_path) if f.lower().endswith((".jpg", ".jpeg", ".png")))
+    new_scans = [n for n in images
+                 if not any(b for b, c in seen_barcodes.items() if c == category and
+                            next((True for p in products if p["barcode"] == b), False))]
+    print(f"[{category}] {len(images)} images")
+    for name in images:
+        r = scan_image(os.path.join(folder_path, name))
+        barcode = r.get("barcode")
+        if not barcode:
+            print(f"  ✗ {name} → no barcode")
+        elif barcode in seen_barcodes:
+            print(f"  ~ {name} → duplicate {barcode}")
         else:
-            print(f"  ~ {p['brand']} {p['name']} (already exists)")
+            seen_barcodes[barcode] = category
+            progress["barcodes"] = seen_barcodes
+            save_progress(progress)
+            print(f"  ✓ {name} → {barcode}")
+        # no sleep — decode_only doesn't hit OFF
+    print()
 
-    for loc in STORE_LOCATIONS:
-        conn.execute(
-            """INSERT OR REPLACE INTO store_locations (category, aisle, landmarks)
-               VALUES (?,?,?)""",
-            (loc["category"], loc["aisle"], loc.get("landmarks")),
-        )
-        print(f"  + location: {loc['category']} → {loc['aisle']}")
+print(f"=== {len(seen_barcodes)} unique barcodes ===\n")
 
-    conn.commit()
-    conn.close()
-    print("\nDone.")
+# ── Step 2: Fetch full OFF data (skip already fetched + known failures) ───── #
+fetched_barcodes = {p["barcode"] for p in products}
+to_fetch = {b: c for b, c in seen_barcodes.items()
+            if b not in fetched_barcodes and b not in failed_off}
 
+if to_fetch:
+    print(f"=== Step 2: Fetching OFF data for {len(to_fetch)} products ===\n")
+    for barcode, category in to_fetch.items():
+        data = fetch_off(barcode)
+        if not data or data.get("status") != 1:
+            print(f"  ✗ {barcode} ({category}) — rate limited or not found, will retry next run")
+            failed_off.add(barcode)
+            progress["failed_off"] = list(failed_off)
+            save_progress(progress)
+            time.sleep(5)
+            continue
+        p = data["product"]
+        n = p.get("nutriments", {})
+        product = {
+            "barcode":       barcode,
+            "category":      category,
+            "name":          p.get("product_name") or "",
+            "brand":         (p.get("brands") or "").split(",")[0].strip(),
+            "serving_size":  p.get("serving_size"),
+            "nutriscore":    p.get("nutriscore_grade"),
+            "nova":          p.get("nova_group"),
+            "allergens":     json.dumps(strip_prefix(p.get("allergens_tags", []))),
+            "labels":        json.dumps(strip_prefix(p.get("labels_tags", []))),
+            "calories":      n.get("energy-kcal_100g"),
+            "protein":       n.get("proteins_100g"),
+            "fat":           n.get("fat_100g"),
+            "saturated_fat": n.get("saturated-fat_100g"),
+            "sugars":        n.get("sugars_100g"),
+            "fiber":         n.get("fiber_100g"),
+            "sodium":        n.get("sodium_100g"),
+            "carbs":         n.get("carbohydrates_100g"),
+        }
+        products.append(product)
+        progress["products"] = products
+        save_progress(progress)
+        print(f"  ✓ [{category}] {product['brand']} {product['name']}")
+        time.sleep(5)
+else:
+    print("=== Step 2: All OFF data already fetched ===\n")
 
-if __name__ == "__main__":
-    print(f"Seeding {DB_PATH}...")
-    seed()
+print(f"\n=== {len(products)} products ready ({len(failed_off)} still failing) ===\n")
+
+# ── Step 3: Recreate catalog table and seed ───────────────────────────────── #
+print("=== Step 3: Seeding database ===\n")
+conn = sqlite3.connect(DB_PATH)
+conn.executescript("""
+    DROP TABLE IF EXISTS catalog;
+    CREATE TABLE catalog (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        name          TEXT NOT NULL,
+        brand         TEXT NOT NULL,
+        category      TEXT NOT NULL,
+        calories      REAL, protein REAL, fat REAL,
+        saturated_fat REAL, sugars REAL, fiber REAL,
+        sodium        REAL, carbs REAL,
+        nutriscore    TEXT,
+        nova          INTEGER,
+        allergens     TEXT DEFAULT '[]',
+        labels        TEXT DEFAULT '[]',
+        barcode       TEXT,
+        serving_size  TEXT
+    );
+""")
+
+for p in products:
+    conn.execute("""
+        INSERT INTO catalog
+          (barcode, name, brand, category, serving_size, nutriscore, nova,
+           allergens, labels, calories, protein, fat, saturated_fat,
+           sugars, fiber, sodium, carbs)
+        VALUES
+          (:barcode, :name, :brand, :category, :serving_size, :nutriscore, :nova,
+           :allergens, :labels, :calories, :protein, :fat, :saturated_fat,
+           :sugars, :fiber, :sodium, :carbs)
+    """, p)
+
+conn.commit()
+
+print("Catalog by category:")
+for cat in FOLDER_TO_CATEGORY.values():
+    count = conn.execute("SELECT COUNT(*) FROM catalog WHERE category=?", (cat,)).fetchone()[0]
+    print(f"  {cat}: {count}")
+total = conn.execute("SELECT COUNT(*) FROM catalog").fetchone()[0]
+print(f"\nTotal: {total} products seeded")
+conn.close()
+
+if failed_off:
+    print(f"\n{len(failed_off)} barcodes still failed OFF fetch — re-run the script to retry them")
+else:
+    print("\nAll done! Delete seed_progress.json if you want a clean re-seed next time.")

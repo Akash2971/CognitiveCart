@@ -6,7 +6,7 @@ from models import DetectedProduct, ShelfScanRequest, ShelfScanResponse
 
 router = APIRouter()
 
-KNOWN_CATEGORIES = {"yogurt", "cereal", "cooking_oil", "protein_shake"}
+KNOWN_CATEGORIES = {"yogurt", "milk", "cheese", "jam", "cereal", "granola", "pasta_sauce"}
 
 DETECT_SYSTEM = """\
 You are analyzing grocery shelf images.
@@ -14,18 +14,23 @@ You are analyzing grocery shelf images.
 1. Determine if a grocery shelf or products are visible in the image.
    - If there is NO shelf, NO products, and NO grocery items visible (e.g. wall, floor, person, empty room), \
 output category as empty string "".
-   - If a shelf or products ARE visible, identify the category. Use one of these exact values ONLY if the shelf clearly and predominantly shows that product type:
-     - yogurt        → plain or flavoured yogurt, greek yogurt, skyr, kefir. NOT dairy in general.
-     - cereal        → packaged breakfast cereals, granola, oats, bran flakes, muesli. NOT pancake mix, baking mix, or spices.
-     - cooking_oil   → pure cooking oils only (olive, vegetable, avocado, coconut). NOT spreads, sauces, condiments, ghee.
-     - protein_shake → ready-to-drink protein shakes or protein powder only. NOT meal replacements or energy bars.
-     If the shelf does NOT clearly match one of the four, describe it in a few words (e.g. "spices", "spreads", "baking mixes", "snacks"). Do NOT force-fit into the four categories if unsure.
+   - If a shelf or products ARE visible, identify the category. Use one of these exact values ONLY if the shelf \
+clearly and predominantly shows that product type:
+     - yogurt      → plain or flavoured yogurt, greek yogurt, skyr, kefir. NOT dairy in general.
+     - milk        → dairy milk or plant-based milk (oat, almond, soy, coconut). NOT yogurt or cheese.
+     - cheese      → any cheese (shredded, sliced, block, string). NOT yogurt or dairy spreads.
+     - jam         → jams, jellies, preserves, fruit spreads. NOT sauces or condiments.
+     - cereal      → packaged breakfast cereals (flakes, puffs, loops, clusters). NOT granola or oatmeal packets.
+     - granola     → loose granola, granola bars. NOT boxed breakfast cereals.
+     - pasta_sauce → pasta sauces, marinara, alfredo, pesto, tomato sauce. NOT condiments or dressings.
+     If the shelf does NOT clearly match one of the seven, describe it in a few words (e.g. "spices", "snacks"). \
+Do NOT force-fit into the categories if unsure.
 
 2. List every product whose brand AND name you can read from the labels.
 
 Return valid JSON only:
 {
-  "category": "<one of the four | short description | empty string if no shelf>",
+  "category": "<one of the seven | short description | empty string if no shelf>",
   "products": [{"brand": "<brand>", "name": "<product name>"}]
 }
 """
@@ -81,6 +86,10 @@ def _format_catalog_row(row: dict) -> str:
         ("sugars", "g sugar"), ("fiber", "g fiber"), ("sodium", "mg sodium"),
     ]
     details = [f"{row[k]}{u}" for k, u in fields if row.get(k) is not None]
+    if row.get("nutriscore"):
+        details.append(f"nutriscore-{row['nutriscore'].upper()}")
+    if row.get("nova"):
+        details.append(f"nova-{row['nova']}")
     return f"{row['brand']} {row['name']}: " + ", ".join(details)
 
 
@@ -140,7 +149,7 @@ def shelf_scan(req: ShelfScanRequest):
                 messages=[
                     {"role": "system", "content": (
                         f"You are CognitiveCart. The user is looking at {label} on a grocery shelf. "
-                        f"Our catalog only covers yogurt, cereal, cooking oil, and protein shakes — {label} is not a supported category.\n\n"
+                        f"Our catalog covers yogurt, milk, cheese, jam, cereal, granola, and pasta sauce — {label} is not a supported category.\n\n"
                         f"USER PROFILE:\nGoals: {profile_vars['goals']}\n"
                         f"Restrictions: {profile_vars['restrictions']}\n"
                         f"Priorities: {profile_vars['priorities']}\n\n"
