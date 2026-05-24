@@ -26,11 +26,19 @@ interface PttMessage {
   content: string;
 }
 
+interface TopProduct {
+  name: string;
+  brand: string | null;
+  reason: string;
+  score: number;
+}
+
 interface ShelfResult {
   category: string;
   spoken: string;
   recommendation: string;
   winner: string | null;
+  top3: TopProduct[];
   fallback_level: number;
   detected_products: { name: string; brand: string; in_db: 'found' | 'uncertain' }[];
 }
@@ -249,8 +257,8 @@ export default function TripScreen() {
     setIsProcessing(true);
 
     try { await Voice.stop(); } catch {}
-    // Wait 2s for speech recognition to finalise its last result
-    await new Promise<void>(r => setTimeout(r, 2000));
+    // Wait 1s for speech recognition to finalise its last result
+    await new Promise<void>(r => setTimeout(r, 1000));
 
     const text = transcriptRef.current.trim();
     if (!text) { setIsProcessing(false); return; }
@@ -607,12 +615,26 @@ export default function TripScreen() {
             ) : shelfResult ? (
               <>
                 <Text style={styles.shelfResultTitle}>
-                  {shelfResult.fallback_level === 1 ? `Best pick · ${shelfResult.category.replace('_', ' ')}` : shelfResult.fallback_level === 2 ? 'General Advice' : 'Could not identify shelf'}
+                  {shelfResult.fallback_level === 1
+                    ? `Top picks · ${shelfResult.category.replace('_', ' ')}`
+                    : shelfResult.fallback_level === 2 ? 'General Advice' : 'Could not identify shelf'}
                 </Text>
-                {shelfResult.winner && (
-                  <Text style={styles.resultWinner}>{shelfResult.winner}</Text>
+                {shelfResult.top3.length > 0 ? (
+                  shelfResult.top3.map((p, i) => (
+                    <View key={i} style={styles.topProductCard}>
+                      <View style={styles.topProductHeader}>
+                        <Text style={styles.topProductRank}>#{i + 1}</Text>
+                        <Text style={styles.topProductName} numberOfLines={1}>{p.brand ? `${p.brand} ` : ''}{p.name}</Text>
+                        <View style={[styles.scoreBadge, p.score >= 8 ? styles.scoreHigh : p.score >= 5 ? styles.scoreMid : styles.scoreLow]}>
+                          <Text style={styles.scoreBadgeText}>{p.score}/10</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.topProductReason}>{p.reason}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.resultReason}>{shelfResult.recommendation}</Text>
                 )}
-                <Text style={styles.resultReason}>{shelfResult.recommendation}</Text>
                 {shelfResult.detected_products.length > 0 && (
                   <View style={styles.shelfDetectedList}>
                     <Text style={styles.shelfDetectedLabel}>Spotted on shelf</Text>
@@ -765,6 +787,16 @@ const styles = StyleSheet.create({
   verdictText:        { color: '#fff', fontSize: 14, fontWeight: '700' },
   resultWinner:       { color: '#fff', fontSize: 18, fontWeight: '700' },
   resultReason:       { color: '#9ca3af', fontSize: 15, lineHeight: 22 },
+  topProductCard:     { backgroundColor: '#222', borderRadius: 12, padding: 12, gap: 6 },
+  topProductHeader:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  topProductRank:     { color: '#4b5563', fontSize: 13, fontWeight: '700', width: 20 },
+  topProductName:     { color: '#fff', fontSize: 14, fontWeight: '600', flex: 1 },
+  topProductReason:   { color: '#9ca3af', fontSize: 13, lineHeight: 19 },
+  scoreBadge:         { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
+  scoreHigh:          { backgroundColor: '#14532d' },
+  scoreMid:           { backgroundColor: '#713f12' },
+  scoreLow:           { backgroundColor: '#450a0a' },
+  scoreBadgeText:     { color: '#fff', fontSize: 12, fontWeight: '700' },
   resultErrorTitle:   { color: '#f87171', fontSize: 17, fontWeight: '600' },
   resultClose: {
     marginTop: 4, height: 48, borderRadius: 24, backgroundColor: '#2a2a2a',

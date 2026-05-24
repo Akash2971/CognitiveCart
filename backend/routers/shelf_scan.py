@@ -2,7 +2,7 @@ import json
 from fastapi import APIRouter
 from config import MODEL, client
 from database import fuzzy_match_catalog, get_catalog_by_category, get_user_profile
-from models import DetectedProduct, ShelfScanRequest, ShelfScanResponse
+from models import DetectedProduct, ShelfScanRequest, ShelfScanResponse, TopProduct
 
 router = APIRouter()
 
@@ -36,8 +36,8 @@ Return valid JSON only:
 """
 
 RECOMMEND_SYSTEM = """\
-You are CognitiveCart's shelf assistant. Recommend the single best product for this user \
-from the catalog list below. Spoken tone, max 2 sentences.
+You are CognitiveCart's shelf assistant. Rank the top 3 best products for this user \
+from the catalog list below.
 
 USER PROFILE:
 Goals: {goals}
@@ -46,12 +46,15 @@ Priorities: {priorities}
 
 RULES:
 - Choose ONLY from the products listed below.
-- Base your decision solely on the provided nutrition data, never your own knowledge.
-- Cite one specific number to justify your pick.
+- Base your decision solely on the provided nutrition data, allergens, and labels — never your own knowledge.
+- Respect restrictions strictly: exclude any product whose allergens conflict with the user's restrictions.
+- For each pick, give a score from 1-10 reflecting how well it fits the user's goals and priorities.
+- Cite one specific number or label to justify each pick.
+- spoken: 2 sentences spoken recommendation for the #1 pick only.
 
 Return valid JSON:
-{{"winner": "<exact name from list>", "reason": "<one sentence with a specific number>", \
-"spoken": "<2 sentence spoken recommendation>"}}
+{{"top3": [{{"name": "<exact name>", "reason": "<one sentence>", "score": <1-10>}}, ...], \
+"spoken": "<2 sentence spoken recommendation for #1 pick>"}}
 """
 
 
@@ -83,13 +86,26 @@ def _call_detect(frames: list[str]) -> dict:
 def _format_catalog_row(row: dict) -> str:
     fields = [
         ("calories", "kcal"), ("protein", "g protein"), ("fat", "g fat"),
-        ("sugars", "g sugar"), ("fiber", "g fiber"), ("sodium", "mg sodium"),
+        ("saturated_fat", "g sat-fat"), ("sugars", "g sugar"),
+        ("fiber", "g fiber"), ("sodium", "mg sodium"),
     ]
     details = [f"{row[k]}{u}" for k, u in fields if row.get(k) is not None]
     if row.get("nutriscore"):
         details.append(f"nutriscore-{row['nutriscore'].upper()}")
     if row.get("nova"):
         details.append(f"nova-{row['nova']}")
+    try:
+        allergens = json.loads(row.get("allergens") or "[]")
+        if allergens:
+            details.append(f"allergens: {', '.join(allergens)}")
+    except Exception:
+        pass
+    try:
+        labels = json.loads(row.get("labels") or "[]")
+        if labels:
+            details.append(f"labels: {', '.join(labels)}")
+    except Exception:
+        pass
     return f"{row['brand']} {row['name']}: " + ", ".join(details)
 
 
@@ -212,19 +228,41 @@ def shelf_scan(req: ShelfScanRequest):
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=256,
+            max_tokens=600,
             response_format={"type": "json_object"},
         )
         parsed = json.loads(resp.choices[0].message.content.strip())
+        raw_top3 = parsed.get("top3", [])
+
+        # Look up brand for each pick from catalog rows
+        name_to_row = {r["name"]: r for r in catalog_rows}
+        top3 = []
+        for item in raw_top3[:3]:
+            row = name_to_row.get(item.get("name", ""), {})
+            try:
+                score = int(str(item.get("score", 0)).split("/")[0])
+            except (ValueError, TypeError):
+                score = 0
+            top3.append(TopProduct(
+                name=item.get("name", ""),
+                brand=row.get("brand"),
+                reason=item.get("reason", ""),
+                score=score,
+            ))
+
         return ShelfScanResponse(
             category=category,
             detected_products=detected,
-            recommendation=parsed.get("reason", ""),
-            winner=parsed.get("winner"),
+            recommendation=top3[0].reason if top3 else "",
+            winner=top3[0].name if top3 else None,
+            top3=top3,
             fallback_level=1,
             spoken=parsed.get("spoken", ""),
         )
-    except Exception:
+    except Exception as e:
+        import traceback
+        print("[shelf_scan] recommendation failed:", e, flush=True)
+        traceback.print_exc()
         return ShelfScanResponse(
             category=category,
             detected_products=detected,

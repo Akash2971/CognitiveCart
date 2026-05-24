@@ -230,11 +230,18 @@ class DetectedProduct(BaseModel):
 class ShelfScanRequest(BaseModel):
     frames: list[str]  # base64 JPEGs
 
+class TopProduct(BaseModel):
+    name: str
+    brand: Optional[str] = None
+    reason: str
+    score: int  # 1-10, how well it fits the user profile
+
 class ShelfScanResponse(BaseModel):
-    category: str                        # detected category or "other"
+    category: str
     detected_products: list[DetectedProduct]
     recommendation: str
-    winner: Optional[str] = None         # exact product name from DB
+    winner: Optional[str] = None
+    top3: list[TopProduct] = []
     fallback_level: int                  # 1 = full DB recommendation, 2 = category known, 3 = unknown
     spoken: str
 
