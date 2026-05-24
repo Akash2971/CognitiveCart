@@ -6,6 +6,7 @@ import requests
 import zxingcpp
 from fastapi import APIRouter, HTTPException
 from PIL import Image, ImageEnhance, ImageFilter
+from pydantic import BaseModel
 
 from database import clear_scanned_products, get_all_scanned_products, get_scanned_product, update_scanned_price, upsert_scanned_product
 from models import (
@@ -99,6 +100,58 @@ def _read_barcode(b64: str) -> str | None:
             if result:
                 return result
     return None
+
+
+class _TestBarcodeRequest(BaseModel):
+    image: str | None = None    # base64 JPEG
+    barcode: str | None = None  # raw barcode string (skip image scan)
+    decode_only: bool = False   # if True, skip OFF lookup and just return the barcode
+
+@router.post("/test/barcode")
+def test_barcode(req: _TestBarcodeRequest):
+    barcode = req.barcode
+    if not barcode:
+        if not req.image:
+            return {"error": "provide image or barcode"}
+        try:
+            barcode = _read_barcode(req.image)
+        except Exception as e:
+            return {"error": f"image decode failed: {e}"}
+        if not barcode:
+            return {"barcode": None, "found": False, "error": "no barcode detected in image"}
+
+    if req.decode_only:
+        return {"barcode": barcode, "found": None}
+
+    try:
+        resp = requests.get(
+            OFF_URL.format(barcode=barcode),
+            params={"fields": OFF_FIELDS},
+            headers=OFF_HEADERS,
+            timeout=8,
+        )
+    except requests.RequestException as e:
+        return {"barcode": barcode, "found": False, "error": str(e)}
+
+    data = resp.json()
+    if data.get("status") != 1:
+        return {"barcode": barcode, "found": False, "error": "not in Open Food Facts"}
+
+    p = data["product"]
+    n = p.get("nutriments", {})
+    return {
+        "barcode": barcode,
+        "found": True,
+        "name": p.get("product_name"),
+        "brand": p.get("brands"),
+        "size": p.get("quantity"),
+        "nutriscore": p.get("nutriscore_grade"),
+        "nova": p.get("nova_group"),
+        "calories": n.get("energy-kcal_100g"),
+        "protein": n.get("proteins_100g"),
+        "fat": n.get("fat_100g"),
+        "sugars": n.get("sugars_100g"),
+    }
 
 
 @router.post("/scan_barcode", response_model=BarcodeScanResponse)

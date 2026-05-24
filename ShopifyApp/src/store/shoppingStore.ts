@@ -34,13 +34,21 @@ export interface CaptureMessage {
   sessionEnd?: boolean;
 }
 
+export interface UserProfile {
+  goals: string[];
+  restrictions: string[];
+  priorities: string[];
+}
+
 interface ShoppingStore {
   items: ShoppingItem[];
   sessionId: string | null;
-  storeMap: string | null;
+  storeMap: string | null;        // base64 for preview display only
+  mapParsed: boolean;             // true once backend has parsed the map
   messages: ChatMessage[];
   captureMessages: CaptureMessage[];
   captureMode: 'passive' | 'active';
+  userProfile: UserProfile;
   addItem: (name: string) => void;
   removeItem: (id: string) => void;
   updateDetection: (itemName: string, det: {
@@ -52,6 +60,7 @@ interface ShoppingStore {
   markNotFound: (itemName: string) => void;
   toggleCheck: (id: string) => void;
   setStoreMap: (base64: string | null) => void;
+  setMapParsed: (parsed: boolean) => void;
   setSessionId: (id: string) => void;
   resetDetections: () => void;
   addMessage: (role: 'user' | 'assistant', content: string, proposals?: string[], suggestions?: string[]) => void;
@@ -62,15 +71,18 @@ interface ShoppingStore {
   setCaptureFeedback: (id: string, feedback: 'up' | 'down') => void;
   endCaptureSession: () => void;
   setCaptureMode: (mode: 'passive' | 'active') => void;
+  setUserProfile: (profile: UserProfile) => void;
 }
 
 export const useShoppingStore = create<ShoppingStore>((set) => ({
   items: [],
   sessionId: null,
   storeMap: null,
+  mapParsed: false,
   messages: [],
   captureMessages: [],
   captureMode: 'passive',
+  userProfile: { goals: [], restrictions: [], priorities: [] },
 
   addItem: (name) =>
     set((state) => {
@@ -119,6 +131,7 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
     })),
 
   setStoreMap: (base64) => set({ storeMap: base64 }),
+  setMapParsed: (parsed) => set({ mapParsed: parsed }),
 
   setSessionId: (id) => set({ sessionId: id }),
 
@@ -182,4 +195,6 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
     }),
 
   setCaptureMode: (mode) => set({ captureMode: mode }),
+
+  setUserProfile: (profile) => set({ userProfile: profile }),
 }));

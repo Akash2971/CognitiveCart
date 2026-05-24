@@ -3,22 +3,38 @@ import { Text } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import ShoppingListScreen from './src/screens/ShoppingListScreen';
-import LiveCaptureScreen from './src/screens/LiveCaptureScreen';
 import ChatScreen from './src/screens/ChatScreen';
+import TripScreen from './src/screens/TripScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
+import { useShoppingStore } from './src/store/shoppingStore';
+import Wearables from './WearablesModule';
+import { BACKEND_URL } from './src/config';
 
 export type RootTabParamList = {
-  List: undefined;
-  Capture: undefined;
   Chat: undefined;
+  List: undefined;
+  Trip: undefined;
+  Profile: undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
-const BACKEND_URL = 'http://192.168.0.252:8080';
-
 export default function App() {
+  const { setUserProfile } = useShoppingStore();
+
   useEffect(() => {
     fetch(`${BACKEND_URL}/scanned_products`, { method: 'DELETE' }).catch(() => {});
+    Wearables.checkCameraPermission()
+      .then(status => { if (status !== 'granted') return Wearables.requestCameraPermission(); })
+      .catch(() => {});
+    fetch(`${BACKEND_URL}/user_profile`)
+      .then(r => r.json())
+      .then(data => setUserProfile({
+        goals: data.goals ?? [],
+        restrictions: data.restrictions ?? [],
+        priorities: data.priorities ?? [],
+      }))
+      .catch(() => {});
   }, []);
 
   return (
@@ -48,8 +64,13 @@ export default function App() {
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>☰</Text> }}
         />
         <Tab.Screen
-          name="Capture"
-          component={LiveCaptureScreen}
+          name="Trip"
+          component={TripScreen}
+          options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>🛒</Text> }}
+        />
+        <Tab.Screen
+          name="Profile"
+          component={ProfileScreen}
           options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>◉</Text> }}
         />
       </Tab.Navigator>

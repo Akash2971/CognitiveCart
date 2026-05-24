@@ -9,3 +9,14 @@
   8. Navigation wiring   
   9. Redesign barcode flow similar to Yuka app.                                             
                   
+
+  agent logic : 
+                                                                                                   
+  1. User profile — DB table + backend CRUD + profile screen in app. Everything else depends on    
+  this (VLM context injection, constraint capture).
+  2. Update vision_chat — structured JSON output (tool, load_type, new_constraint), inject user    
+  profile into system prompt. Active mode becomes fully aware.                                     
+  3. Passive detection — replace /dwell_check with /passive_check (VLM signal classification),     
+  update frontend polling logic, remove old Hamming scoring.                                       
+  4. Frontend wiring — load type display in status bar, constraint save offer flow (PTT confirm →  
+  PATCH profile).   

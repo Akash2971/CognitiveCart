@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useShoppingStore, type ChatMessage } from '../store/shoppingStore';
 
-const BACKEND_URL = 'http://192.168.0.252:8080';
+import { BACKEND_URL } from '../config';
 
 // --------------------------------------------------------------------------- //
 // ProposalCard
@@ -179,7 +179,6 @@ export default function ChatScreen() {
     m => m.proposals && m.proposals.length > 0 && !m.proposalResolved
   );
   const inputBlocked = !!activeSuggestionMsg || !!activeProposalMsg;
-  console.log('[DEBUG] activeSuggestionMsg:', activeSuggestionMsg?.id, activeSuggestionMsg?.suggestions);
 
   useEffect(() => {
     if (messages.length === 0) {
