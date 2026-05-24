@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -48,6 +49,7 @@ function ProposalPanel({
   return (
     <View style={styles.suggestionPanel}>
       <Text style={styles.suggestionPanelLabel}>Suggested ingredients</Text>
+      <ScrollView style={styles.panelScroll} showsVerticalScrollIndicator={false}>
       {proposals.map((item, i) => {
         const inCart = alreadyAdded.has(item.toLowerCase());
         return (
@@ -65,6 +67,7 @@ function ProposalPanel({
           </Pressable>
         );
       })}
+      </ScrollView>
       <View style={styles.proposalActions}>
         <Pressable
           style={[styles.addBtn, count === 0 && styles.addBtnDisabled]}
@@ -103,6 +106,7 @@ function SuggestionPanel({
   return (
     <View style={styles.suggestionPanel}>
       <Text style={styles.suggestionPanelLabel}>What would you like to make?</Text>
+      <ScrollView style={styles.panelScroll} showsVerticalScrollIndicator={false}>
       {suggestions.map((dish, i) => (
         <Pressable key={dish} style={styles.suggestionPanelRow} onPress={() => onPick(dish)}>
           <View style={styles.suggestionNum}>
@@ -112,6 +116,7 @@ function SuggestionPanel({
           <Text style={styles.suggestionPanelArrow}>→</Text>
         </Pressable>
       ))}
+      </ScrollView>
       <View style={[styles.suggestionPanelRow, styles.suggestionElseRow]}>
         <View style={[styles.suggestionNum, styles.suggestionElseNum]}>
           <Text style={styles.suggestionElseIcon}>✎</Text>
@@ -435,8 +440,9 @@ const styles = StyleSheet.create({
   suggestionPanel: {
     borderTopWidth: 1, borderTopColor: '#2a2a2a',
     backgroundColor: '#111', paddingTop: 14, paddingBottom: 4,
-    paddingHorizontal: 16,
+    paddingHorizontal: 16, maxHeight: 320,
   },
+  panelScroll: { maxHeight: 200 },
   suggestionPanelLabel:   { color: '#9ca3af', fontSize: 13, fontWeight: '600', marginBottom: 10 },
   suggestionPanelRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,

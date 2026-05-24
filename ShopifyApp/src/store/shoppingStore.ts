@@ -26,14 +26,6 @@ export interface ChatMessage {
   suggestionResolved?: boolean;
 }
 
-export interface CaptureMessage {
-  id: string;
-  role: 'assistant' | 'user';
-  content: string;
-  feedback?: 'up' | 'down';
-  sessionEnd?: boolean;
-}
-
 export interface UserProfile {
   goals: string[];
   restrictions: string[];
@@ -43,11 +35,7 @@ export interface UserProfile {
 interface ShoppingStore {
   items: ShoppingItem[];
   sessionId: string | null;
-  storeMap: string | null;        // base64 for preview display only
-  mapParsed: boolean;             // true once backend has parsed the map
   messages: ChatMessage[];
-  captureMessages: CaptureMessage[];
-  captureMode: 'passive' | 'active';
   userProfile: UserProfile;
   addItem: (name: string) => void;
   removeItem: (id: string) => void;
@@ -59,29 +47,19 @@ interface ShoppingStore {
   }) => void;
   markNotFound: (itemName: string) => void;
   toggleCheck: (id: string) => void;
-  setStoreMap: (base64: string | null) => void;
-  setMapParsed: (parsed: boolean) => void;
   setSessionId: (id: string) => void;
   resetDetections: () => void;
   addMessage: (role: 'user' | 'assistant', content: string, proposals?: string[], suggestions?: string[]) => void;
   clearMessages: () => void;
   resolveProposal: (id: string) => void;
   resolveSuggestion: (id: string) => void;
-  addCaptureMessage: (role: 'assistant' | 'user', content: string) => void;
-  setCaptureFeedback: (id: string, feedback: 'up' | 'down') => void;
-  endCaptureSession: () => void;
-  setCaptureMode: (mode: 'passive' | 'active') => void;
   setUserProfile: (profile: UserProfile) => void;
 }
 
 export const useShoppingStore = create<ShoppingStore>((set) => ({
   items: [],
   sessionId: null,
-  storeMap: null,
-  mapParsed: false,
   messages: [],
-  captureMessages: [],
-  captureMode: 'passive',
   userProfile: { goals: [], restrictions: [], priorities: [] },
 
   addItem: (name) =>
@@ -130,9 +108,6 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
       ),
     })),
 
-  setStoreMap: (base64) => set({ storeMap: base64 }),
-  setMapParsed: (parsed) => set({ mapParsed: parsed }),
-
   setSessionId: (id) => set({ sessionId: id }),
 
   resetDetections: () =>
@@ -170,31 +145,6 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
         m.id === id ? { ...m, suggestionResolved: true } : m
       ),
     })),
-
-  addCaptureMessage: (role, content) =>
-    set((state) => ({
-      captureMessages: [
-        ...state.captureMessages,
-        { id: uid(), role, content },
-      ],
-    })),
-
-  setCaptureFeedback: (id, feedback) =>
-    set((state) => ({
-      captureMessages: state.captureMessages.map((m) =>
-        m.id === id ? { ...m, feedback } : m
-      ),
-    })),
-
-  endCaptureSession: () =>
-    set((state) => {
-      const msgs = [...state.captureMessages];
-      if (msgs.length === 0) return state;
-      msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], sessionEnd: true };
-      return { captureMessages: msgs, captureMode: 'passive' };
-    }),
-
-  setCaptureMode: (mode) => set({ captureMode: mode }),
 
   setUserProfile: (profile) => set({ userProfile: profile }),
 }));

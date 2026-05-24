@@ -81,38 +81,6 @@ def get_all_scanned_products() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def fuzzy_match_product(brand: str, item_name: str) -> tuple:
-    """Fuzzy match brand+item against products table. Returns (row, score)."""
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT p.*, c.name as category_name
-        FROM products p
-        JOIN categories c ON p.category_id = c.id
-        WHERE c.name = ?
-        """,
-        (item_name.lower(),),
-    )
-    rows = cur.fetchall()
-    conn.close()
-
-    if not rows:
-        return None, 0.0
-
-    candidates = {r["id"]: f"{r['brand']} {r['name']}" for r in rows}
-    result = process.extractOne(brand, candidates, scorer=fuzz.token_set_ratio)
-
-    if result is None:
-        return None, 0.0
-
-    _best_text, score, best_id = result
-    if score < 50:
-        return None, score / 100
-
-    matched_row = next(r for r in rows if r["id"] == best_id)
-    return dict(matched_row), score / 100
-
 
 def init_new_tables() -> None:
     conn = get_db()
@@ -233,23 +201,3 @@ def set_user_profile(goals: list, restrictions: list, priorities: list) -> None:
     conn.close()
 
 
-def log_detection(
-    session_id: str,
-    item: str,
-    brand: Optional[str],
-    raw_text: str,
-    product_id: Optional[int],
-    matched: bool,
-    confidence: float,
-):
-    conn = get_db()
-    conn.execute(
-        """
-        INSERT INTO raw_detections
-        (session_id, item_name, raw_brand, raw_text, product_id, matched, confidence)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (session_id, item, brand, raw_text, product_id, int(matched), confidence),
-    )
-    conn.commit()
-    conn.close()

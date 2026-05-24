@@ -71,7 +71,7 @@ export default function App() {
         <Tab.Screen
           name="Profile"
           component={ProfileScreen}
-          options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>◉</Text> }}
+          options={{ tabBarIcon: ({ color }) => <Text style={{ fontSize: 18, color }}>👤</Text> }}
         />
       </Tab.Navigator>
     </NavigationContainer>

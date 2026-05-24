@@ -1,15 +1,12 @@
 import React, { useState } from 'react';
 import {
   FlatList,
-  Image,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { launchImageLibrary } from 'react-native-image-picker';
 import { useShoppingStore, type ShoppingItem } from '../store/shoppingStore';
 
 function Checkbox({ checked }: { checked: boolean }) {
@@ -42,47 +39,12 @@ function ItemRow({ item }: { item: ShoppingItem }) {
   );
 }
 
-import { BACKEND_URL } from '../config';
-
 export default function ShoppingListScreen() {
-  const { items, addItem, storeMap, setStoreMap, mapParsed, setMapParsed } = useShoppingStore();
+  const { items, addItem } = useShoppingStore();
   const [showAdd, setShowAdd] = useState(false);
   const [addText, setAddText] = useState('');
-  const [showMapModal, setShowMapModal] = useState(false);
-  const [mapUploading, setMapUploading] = useState(false);
-  const [mapError, setMapError] = useState<string | null>(null);
 
   const checkedCount = items.filter((i) => i.checked).length;
-
-  const handleUploadMap = () => {
-    launchImageLibrary({ mediaType: 'photo', quality: 0.5, includeBase64: true, maxWidth: 1024, maxHeight: 1024 }, async (response) => {
-      const base64 = response.assets?.[0]?.base64;
-      if (!base64) return;
-
-      setStoreMap(base64);         // store for preview
-      setMapParsed(false);
-      setMapError(null);
-      setMapUploading(true);
-
-      try {
-        const res = await fetch(`${BACKEND_URL}/store_map`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64 }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          setMapParsed(true);
-        } else {
-          setMapError(data.message ?? 'Failed to parse map.');
-        }
-      } catch {
-        setMapError('Could not reach the server.');
-      } finally {
-        setMapUploading(false);
-      }
-    });
-  };
 
   const handleAdd = () => {
     if (addText.trim()) {
@@ -100,45 +62,8 @@ export default function ShoppingListScreen() {
           {items.length > 0 && (
             <Text style={styles.counter}>{checkedCount} of {items.length}</Text>
           )}
-          <Pressable onPress={() => setShowMapModal(true)} hitSlop={12} style={styles.mapBtn}>
-            <Text style={styles.mapBtnText}>🗺</Text>
-            {mapParsed && <View style={styles.mapDot} />}
-          </Pressable>
         </View>
       </View>
-
-      <Modal visible={showMapModal} transparent animationType="slide" onRequestClose={() => setShowMapModal(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowMapModal(false)}>
-          <Pressable style={styles.modalSheet} onPress={() => {}}>
-            <Text style={styles.modalTitle}>Store Map</Text>
-            {storeMap ? (
-              <>
-                <Image source={{ uri: `data:image/jpeg;base64,${storeMap}` }} style={styles.mapPreview} resizeMode="contain" />
-                {mapUploading && <Text style={styles.modalHint}>Parsing map...</Text>}
-                {mapParsed && !mapUploading && <Text style={[styles.modalHint, { color: '#22c55e' }]}>Map ready — navigation enabled</Text>}
-                {mapError && <Text style={[styles.modalHint, { color: '#ef4444' }]}>{mapError}</Text>}
-                <Pressable style={styles.modalBtn} onPress={handleUploadMap} disabled={mapUploading}>
-                  <Text style={styles.modalBtnText}>Replace map</Text>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <Text style={styles.modalHint}>
-                  Upload a photo of the store map to enable aisle navigation.
-                </Text>
-                <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleUploadMap} disabled={mapUploading}>
-                  <Text style={[styles.modalBtnText, styles.modalBtnTextPrimary]}>
-                    {mapUploading ? 'Parsing...' : 'Upload store map'}
-                  </Text>
-                </Pressable>
-              </>
-            )}
-            <Pressable style={[styles.modalBtn, { marginTop: 8 }]} onPress={() => setShowMapModal(false)}>
-              <Text style={styles.modalBtnText}>Done</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {items.length === 0 ? (
         <View style={styles.emptyBox}>
@@ -211,73 +136,6 @@ const styles = StyleSheet.create({
   counter: {
     fontSize: 14,
     color: '#888',
-  },
-  mapBtn: {
-    position: 'relative',
-    padding: 4,
-  },
-  mapBtnText: {
-    fontSize: 20,
-  },
-  mapDot: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#22c55e',
-    borderWidth: 1.5,
-    borderColor: '#111',
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: '#1a1a1a',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 24,
-    paddingBottom: 40,
-    gap: 12,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  modalHint: {
-    fontSize: 14,
-    color: '#888',
-    lineHeight: 20,
-  },
-  mapPreview: {
-    width: '100%',
-    height: 220,
-    borderRadius: 12,
-    backgroundColor: '#2a2a2a',
-  },
-  modalBtn: {
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  modalBtnPrimary: {
-    backgroundColor: '#22c55e',
-    borderColor: '#22c55e',
-  },
-  modalBtnText: {
-    color: '#888',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  modalBtnTextPrimary: {
-    color: '#fff',
   },
   list: {
     flex: 1,

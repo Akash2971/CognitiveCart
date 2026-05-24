@@ -12,6 +12,14 @@ _api_key: str = os.getenv("VLLM_API_KEY", "none")
 
 client = OpenAI(base_url=_vlm_url, api_key=_api_key)
 
+# Groq — vision: Llama 4 Scout, text: GPT OSS 120B
+GROQ_VISION_MODEL: str = os.getenv("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+GROQ_TEXT_MODEL: str = os.getenv("GROQ_TEXT_MODEL", "openai/gpt-oss-120b")
+groq_client = OpenAI(
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.getenv("GROQ_API_KEY", ""),
+)
+
 
 def set_vlm_url(url: str) -> None:
     global client, _vlm_url

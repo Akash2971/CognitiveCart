@@ -1,6 +1,6 @@
 import json
 from fastapi import APIRouter
-from config import MODEL, client
+from config import GROQ_TEXT_MODEL as MODEL, GROQ_VISION_MODEL, groq_client as client
 from database import fuzzy_match_catalog, get_catalog_by_category, get_user_profile
 from models import DetectedProduct, ShelfScanRequest, ShelfScanResponse, TopProduct
 
@@ -14,17 +14,18 @@ You are analyzing grocery shelf images.
 1. Determine if a grocery shelf or products are visible in the image.
    - If there is NO shelf, NO products, and NO grocery items visible (e.g. wall, floor, person, empty room), \
 output category as empty string "".
-   - If a shelf or products ARE visible, identify the category. Use one of these exact values ONLY if the shelf \
-clearly and predominantly shows that product type:
+   - If a shelf or products ARE visible, identify the category. Use one of these exact values if any visible \
+product clearly belongs to that type:
      - yogurt      → plain or flavoured yogurt, greek yogurt, skyr, kefir. NOT dairy in general.
      - milk        → dairy milk or plant-based milk (oat, almond, soy, coconut). NOT yogurt or cheese.
      - cheese      → any cheese (shredded, sliced, block, string). NOT yogurt or dairy spreads.
      - jam         → jams, jellies, preserves, fruit spreads. NOT sauces or condiments.
      - cereal      → packaged breakfast cereals (flakes, puffs, loops, clusters). NOT granola or oatmeal packets.
-     - granola     → loose granola, granola bars. NOT boxed breakfast cereals.
+     - granola     → granola, granola bars, protein granola, oat clusters. NOT boxed breakfast cereals.
      - pasta_sauce → pasta sauces, marinara, alfredo, pesto, tomato sauce. NOT condiments or dressings.
-     If the shelf does NOT clearly match one of the seven, describe it in a few words (e.g. "spices", "snacks"). \
-Do NOT force-fit into the categories if unsure.
+     If products are visible but do NOT match any of the seven, describe in a few words (e.g. "snacks", "protein bars"). \
+Do NOT output empty category when products are detected — only output "" when truly nothing is visible.
+     If multiple categories are visible on the shelf, output the one that occupies the most shelf space or has the most products.
 
 2. List every product whose brand AND name you can read from the labels.
 
@@ -66,7 +67,7 @@ def _call_detect(frames: list[str]) -> dict:
 
     try:
         resp = client.chat.completions.create(
-            model=MODEL,
+            model=GROQ_VISION_MODEL,
             messages=[
                 {"role": "system", "content": DETECT_SYSTEM},
                 {"role": "user", "content": content},
@@ -74,6 +75,13 @@ def _call_detect(frames: list[str]) -> dict:
             temperature=0.1,
             max_tokens=512,
             response_format={"type": "json_object"},
+        )
+        usage = resp.usage
+        print(
+            f"[shelf_scan] scout tokens — prompt={usage.prompt_tokens} "
+            f"completion={usage.completion_tokens} "
+            f"reasoning={getattr(usage, 'reasoning_tokens', None) or getattr(getattr(usage, 'completion_tokens_details', None), 'reasoning_tokens', 'n/a')}",
+            flush=True,
         )
         result = json.loads(resp.choices[0].message.content.strip())
         print("[shelf_scan] VLM raw output:", json.dumps(result, indent=2), flush=True)
@@ -177,8 +185,9 @@ def shelf_scan(req: ShelfScanRequest):
                     {"role": "user", "content": f"I can see: {product_names}."},
                 ],
                 temperature=0.4,
-                max_tokens=150,
+                max_tokens=256,
                 response_format={"type": "json_object"},
+                extra_body={"reasoning_effort": "low"},
             )
             parsed = json.loads(resp.choices[0].message.content.strip())
             reason = parsed.get("reason", "")
@@ -228,10 +237,21 @@ def shelf_scan(req: ShelfScanRequest):
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=600,
-            response_format={"type": "json_object"},
+            max_tokens=4096,
+            extra_body={"reasoning_effort": "low"},
         )
-        parsed = json.loads(resp.choices[0].message.content.strip())
+        choice = resp.choices[0]
+        usage = resp.usage
+        print(
+            f"[shelf_scan] tokens — prompt={usage.prompt_tokens} "
+            f"completion={usage.completion_tokens} "
+            f"reasoning={getattr(usage, 'reasoning_tokens', None) or getattr(getattr(usage, 'completion_tokens_details', None), 'reasoning_tokens', 'n/a')}",
+            flush=True,
+        )
+        print("[shelf_scan] finish_reason:", choice.finish_reason, flush=True)
+        print("[shelf_scan] raw recommendation:", repr(choice.message.content), flush=True)
+        raw_text = (choice.message.content or "").strip()
+        parsed = json.loads(raw_text)
         raw_top3 = parsed.get("top3", [])
 
         # Look up brand for each pick from catalog rows

@@ -1,6 +1,6 @@
 import json
 from fastapi import APIRouter
-from config import MODEL, client
+from config import GROQ_TEXT_MODEL as MODEL, groq_client as client
 from database import get_user_profile
 from models import PTTRequest, PTTResponse
 
@@ -56,6 +56,7 @@ def ptt(req: PTTRequest):
             messages=messages,
             temperature=0.4,
             max_tokens=128,
+            extra_body={"reasoning_effort": "low"},
         )
         return PTTResponse(response=resp.choices[0].message.content.strip())
     except Exception as e:

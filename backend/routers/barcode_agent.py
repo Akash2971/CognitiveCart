@@ -1,6 +1,6 @@
 import json
 from fastapi import APIRouter
-from config import MODEL, client
+from config import GROQ_TEXT_MODEL as MODEL, groq_client as client
 from database import get_user_profile
 from models import BarcodeAnalyzeRequest, BarcodeAnalyzeResponse
 
@@ -89,7 +89,8 @@ def barcode_analyze(req: BarcodeAnalyzeRequest):
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,
-            max_tokens=256,
+            max_tokens=2048,
+            extra_body={"reasoning_effort": "low"},
             response_format={"type": "json_object"},
         )
         parsed = json.loads(resp.choices[0].message.content.strip())
@@ -99,7 +100,10 @@ def barcode_analyze(req: BarcodeAnalyzeRequest):
             reason=parsed.get("reason", ""),
             spoken=parsed.get("spoken", ""),
         )
-    except Exception:
+    except Exception as e:
+        import traceback
+        print("[barcode_agent] error:", e, flush=True)
+        traceback.print_exc()
         return BarcodeAnalyzeResponse(
             verdict="consider",
             reason="Could not analyze.",

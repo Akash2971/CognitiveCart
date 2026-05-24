@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from openai import APIConnectionError, APIStatusError
 
-from config import client, MODEL
+from config import GROQ_TEXT_MODEL as MODEL, groq_client as client
 from models import ChatRequest, ChatResponse
 
 router = APIRouter()

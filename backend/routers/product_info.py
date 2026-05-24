@@ -3,8 +3,7 @@ import json
 from fastapi import APIRouter
 from openai import APIConnectionError, APIStatusError
 
-from agent_state import add_to_history
-from config import MODEL, client
+from config import GROQ_TEXT_MODEL as MODEL, groq_client as client
 from models import ProductInfoRequest, ProductInfoResponse, ProductSummary
 
 router = APIRouter()
@@ -83,7 +82,8 @@ def product_info(req: ProductInfoRequest):
                 {"role": "user", "content": products_text},
             ],
             temperature=0.3,
-            max_tokens=512,
+            max_tokens=2048,
+            extra_body={"reasoning_effort": "low"},
             response_format={"type": "json_object"},
         )
     except (APIConnectionError, APIStatusError) as e:
@@ -101,8 +101,6 @@ def product_info(req: ProductInfoRequest):
         ]
         comparison = parsed.get("comparison") or None
         spoken = parsed.get("spoken_response", "")
-
-        add_to_history("assistant", spoken)
 
         return ProductInfoResponse(
             products=product_summaries,
