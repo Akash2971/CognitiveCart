@@ -70,6 +70,7 @@ def chat(req: ChatRequest):
             temperature=0.7,
             max_tokens=4096,
             response_format={"type": "json_object"},
+            extra_body={"reasoning_effort": "low"},
         )
     except APIConnectionError:
         return ChatResponse(
