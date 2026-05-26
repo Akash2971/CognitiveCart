@@ -8,8 +8,10 @@ dependencies = [
     "fastapi>=0.135.2",
     "openai>=2.30.0",
     "opencv-python>=4.13.0.92",
+    "pillow>=11.0.0",
     "python-dotenv>=1.2.2",
     "rapidfuzz>=3.14.3",
     "requests>=2.33.1",
     "uvicorn>=0.42.0",
+    "zxingcpp>=2.3.0",
 ]
