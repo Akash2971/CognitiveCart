@@ -341,22 +341,24 @@ export default function TripScreen() {
 
     const frames: string[] = [];
     try {
-      // Subscribe before startStream so we never miss the streaming event
-      const isStreaming = await new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => { sub.remove(); resolve(false); }, 8000);
-        const sub = wearablesEmitter.addListener('onStreamStateChange', ({ state }) => {
-          if (state === 'streaming') {
-            clearTimeout(timer);
-            sub.remove();
-            resolve(true);
-          }
-        });
-        Wearables.startStream().catch(() => {
-          clearTimeout(timer);
-          sub.remove();
-          resolve(false);
-        });
-      });
+      // If already streaming, skip straight to capture; otherwise start and wait
+      const isStreaming = streamState === 'streaming'
+        ? true
+        : await new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => { sub.remove(); resolve(false); }, 8000);
+            const sub = wearablesEmitter.addListener('onStreamStateChange', ({ state }) => {
+              if (state === 'streaming') {
+                clearTimeout(timer);
+                sub.remove();
+                resolve(true);
+              }
+            });
+            Wearables.startStream().catch(() => {
+              clearTimeout(timer);
+              sub.remove();
+              resolve(false);
+            });
+          });
 
       if (!isStreaming || scanCancelledRef.current) throw new Error('stream not ready');
 
