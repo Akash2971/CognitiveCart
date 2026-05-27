@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -91,7 +92,9 @@ export default function TripScreen() {
   // PTT conversation
   const [pttMessages, setPttMessages] = useState<PttMessage[]>([]);
   const [isPTTHeld, setIsPTTHeld] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
   const transcriptRef = useRef('');
   const isPTTHeldRef = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
@@ -153,20 +156,35 @@ export default function TripScreen() {
 
   useEffect(() => {
     try { Tts.setDefaultLanguage('en-US'); } catch {}
+    try { Tts.setIgnoreSilentSwitch('ignore'); } catch {}
+    try { Tts.setDucking(true); } catch {}
     const noop = () => {};
     Tts.addEventListener('tts-start', noop);
     Tts.addEventListener('tts-progress', noop);
     Tts.addEventListener('tts-finish', noop);
     Tts.addEventListener('tts-cancel', noop);
+    Voice.onSpeechStart = () => {
+      if (isPTTHeldRef.current) {
+        try { Tts.stop(); } catch {}
+        setIsStarting(false);
+        setIsPTTHeld(true);
+      }
+    };
     Voice.onSpeechResults = (e: SpeechResultsEvent) => {
       if (e.value?.[0]) transcriptRef.current = e.value[0];
     };
-    Voice.onSpeechError = () => {
-      isPTTHeldRef.current = false;
-      setIsPTTHeld(false);
-      setIsProcessing(false);
+    Voice.onSpeechPartialResults = (e: any) => {
+      if (e.value?.[0]) transcriptRef.current = e.value[0];
     };
-    return () => { Voice.destroy().then(() => Voice.removeAllListeners()); };
+    Voice.onSpeechError = () => {
+      if (isPTTHeldRef.current) {
+        isPTTHeldRef.current = false;
+        setIsStarting(false);
+        setIsPTTHeld(false);
+        setIsProcessing(false);
+      }
+    };
+    return () => { Voice.destroy().catch(() => {}); };
   }, []);
 
   // ── Trip timer ─────────────────────────────────────────────────────────── //
@@ -191,6 +209,21 @@ export default function TripScreen() {
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [pttMessages.length]);
+
+  // Pulse animation while listening
+  useEffect(() => {
+    if (isPTTHeld) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 0.2, duration: 600, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ])
+      ).start();
+    } else {
+      pulseAnim.stopAnimation();
+      pulseAnim.setValue(1);
+    }
+  }, [isPTTHeld]);
 
   // ── Trip controls ──────────────────────────────────────────────────────── //
 
@@ -238,29 +271,30 @@ export default function TripScreen() {
     setPttMessages(prev => [...prev, { id: uid(), role, content }]);
   };
 
-  const handlePTTStart = () => {
-    if (isProcessing) return;
+  const handleMicStart = () => {
+    if (isProcessing || isPTTHeldRef.current) return;
+    try { Tts.stop(); } catch {}
     transcriptRef.current = '';
     isPTTHeldRef.current = true;
-    setIsPTTHeld(true);
-    try { Tts.stop(); } catch {}
-    Voice.start('en-US').catch(() => {
-      isPTTHeldRef.current = false;
-      setIsPTTHeld(false);
-    });
+    setIsStarting(true);
+    Voice.start('en-US')
+      .catch((e: any) => {
+        console.log('[MIC] Voice.start failed', e);
+        isPTTHeldRef.current = false;
+        setIsStarting(false);
+      });
   };
 
-  const handlePTTEnd = async () => {
+  const handleMicStop = async () => {
     if (!isPTTHeldRef.current) return;
     isPTTHeldRef.current = false;
     setIsPTTHeld(false);
     setIsProcessing(true);
 
-    try { await Voice.stop(); } catch {}
-    // Wait 1s for speech recognition to finalise its last result
     await new Promise<void>(r => setTimeout(r, 1000));
-
+    try { await Voice.stop(); } catch {}
     const text = transcriptRef.current.trim();
+    Voice.cancel().catch(() => {});
     if (!text) { setIsProcessing(false); return; }
 
     addMessage('user', text);
@@ -489,8 +523,6 @@ export default function TripScreen() {
 
   // ── Active trip screen ─────────────────────────────────────────────────── //
 
-  const pttLabel = isProcessing ? 'Processing...' : isPTTHeld ? 'Listening...' : 'Hold to Talk';
-
   return (
     <View style={styles.container}>
 
@@ -552,17 +584,31 @@ export default function TripScreen() {
         </Pressable>
       </View>
 
-      {/* PTT button */}
+      {/* Mic button */}
       <View style={styles.pttRow}>
         <Pressable
-          style={[styles.pttBtn, isPTTHeld && styles.pttBtnActive, isProcessing && styles.pttBtnProcessing]}
-          onPressIn={handlePTTStart}
-          onPressOut={handlePTTEnd}
-          disabled={isProcessing}
+          style={[styles.pttBtn, isPTTHeld && styles.pttBtnListening, isProcessing && styles.pttBtnProcessing]}
+          onPress={isPTTHeld ? handleMicStop : handleMicStart}
+          disabled={isProcessing || isStarting}
         >
-          <Text style={[styles.pttBtnText, (isPTTHeld || isProcessing) && styles.pttBtnTextActive]}>
-            {pttLabel}
-          </Text>
+          {isProcessing ? (
+            <View style={styles.pttBtnInner}>
+              <ActivityIndicator color="#fff" size="small" />
+              <Text style={styles.pttBtnTextActive}>Processing...</Text>
+            </View>
+          ) : isStarting ? (
+            <View style={styles.pttBtnInner}>
+              <ActivityIndicator color="#7aa7e0" size="small" />
+              <Text style={styles.pttBtnText}>Connecting mic...</Text>
+            </View>
+          ) : isPTTHeld ? (
+            <View style={styles.pttBtnInner}>
+              <Animated.View style={[styles.micDot, { opacity: pulseAnim }]} />
+              <Text style={styles.pttBtnTextActive}>Tap to Stop</Text>
+            </View>
+          ) : (
+            <Text style={styles.pttBtnText}>Tap to Talk</Text>
+          )}
         </Pressable>
       </View>
 
@@ -772,8 +818,10 @@ const styles = StyleSheet.create({
     height: 56, borderRadius: 28, backgroundColor: '#1e3a6e',
     alignItems: 'center', justifyContent: 'center',
   },
-  pttBtnActive:       { backgroundColor: '#2563eb' },
+  pttBtnListening:    { backgroundColor: '#991b1b' },
   pttBtnProcessing:   { opacity: 0.6 },
+  pttBtnInner:        { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  micDot:             { width: 10, height: 10, borderRadius: 5, backgroundColor: '#fca5a5' },
   pttBtnText:         { color: '#7aa7e0', fontSize: 16, fontWeight: '600' },
   pttBtnTextActive:   { color: '#fff' },
 

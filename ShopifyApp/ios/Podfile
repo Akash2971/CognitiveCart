@@ -30,5 +30,20 @@ target 'ShopifyApp' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Fix react-native-tts BOOL * bridge crash on iOS 26
+    tts_file = File.join(__dir__, '../node_modules/react-native-tts/ios/TextToSpeech/TextToSpeech.m')
+    if File.exist?(tts_file)
+      content = File.read(tts_file)
+      patched = content
+        .gsub('stop:(BOOL *)onWordBoundary', 'stop:(NSNumber *)onWordBoundary')
+        .gsub('pause:(BOOL *)onWordBoundary', 'pause:(NSNumber *)onWordBoundary')
+        .gsub('if(onWordBoundary != NULL && onWordBoundary)', 'if(onWordBoundary != nil && [onWordBoundary boolValue])')
+        .gsub('setDucking:(BOOL *)ducking', 'setDucking:(NSNumber *)ducking')
+        .gsub('_ducking = ducking;', '_ducking = [ducking boolValue];')
+        .gsub('if(ducking)', 'if([ducking boolValue])')
+        .gsub('skipTransform:(BOOL *)skipTransform', 'skipTransform:(NSNumber *)skipTransform')
+      File.write(tts_file, patched) unless content == patched
+    end
   end
 end
