@@ -6,7 +6,7 @@ from models import DetectedProduct, ShelfScanRequest, ShelfScanResponse, TopProd
 
 router = APIRouter()
 
-KNOWN_CATEGORIES = {"yogurt", "milk", "cheese", "jam", "cereal", "granola", "pasta_sauce"}
+KNOWN_CATEGORIES = {"jam", "cereal", "granola", "pasta_sauce"}
 
 DETECT_SYSTEM = """\
 You are analyzing grocery shelf images.
@@ -16,9 +16,6 @@ You are analyzing grocery shelf images.
 output category as empty string "".
    - If a shelf or products ARE visible, identify the category. Use one of these exact values if any visible \
 product clearly belongs to that type:
-     - yogurt      → plain or flavoured yogurt, greek yogurt, skyr, kefir. NOT dairy in general.
-     - milk        → dairy milk or plant-based milk (oat, almond, soy, coconut). NOT yogurt or cheese.
-     - cheese      → any cheese (shredded, sliced, block, string). NOT yogurt or dairy spreads.
      - jam         → jams, jellies, preserves, fruit spreads. NOT sauces or condiments.
      - cereal      → packaged breakfast cereals (flakes, puffs, loops, clusters). NOT granola or oatmeal packets.
      - granola     → granola, granola bars, protein granola, oat clusters. NOT boxed breakfast cereals.
@@ -44,14 +41,20 @@ USER PROFILE:
 Goals: {goals}
 Restrictions: {restrictions}
 Priorities: {priorities}
+Price preference: {price_preference}
 
-RULES:
-- Choose ONLY from the products listed below.
-- Base your decision solely on the provided nutrition data, allergens, and labels — never your own knowledge.
-- Respect restrictions strictly: exclude any product whose allergens conflict with the user's restrictions.
-- For each pick, give a score from 1-10 reflecting how well it fits the user's goals and priorities.
-- Cite one specific number or label to justify each pick.
-- spoken: 2 sentences spoken recommendation for the #1 pick only.
+Conversation context: {conversation_context}\
+RULES (apply in this order — earlier rules take precedence):
+1. If the conversation above expresses a specific preference (e.g. a product type, brand, or attribute), \
+   narrow the selection to products that match it first. Only fall back to the full list if no match exists.
+2. Respect restrictions strictly: exclude any product whose allergens conflict with the user's restrictions.
+3. Apply price preference: if "budget" strongly favour lower-priced options; \
+   if "premium" prioritise nutrition and quality regardless of price; \
+   if "mid-range" balance price and nutrition; if not set ignore price.
+4. Among remaining candidates, rank by how well they fit the user's goals and priorities.
+5. Choose ONLY from the products listed below. Never use outside knowledge.
+6. Cite one specific number or label (and price if relevant) to justify each pick.
+7. spoken: 2 sentences spoken recommendation for the #1 pick only.
 
 Return valid JSON:
 {{"top3": [{{"name": "<exact name>", "reason": "<one sentence>", "score": <1-10>}}, ...], \
@@ -98,6 +101,8 @@ def _format_catalog_row(row: dict) -> str:
         ("fiber", "g fiber"), ("sodium", "mg sodium"),
     ]
     details = [f"{row[k]}{u}" for k, u in fields if row.get(k) is not None]
+    if row.get("price") is not None:
+        details.append(f"${row['price']:.2f}")
     if row.get("nutriscore"):
         details.append(f"nutriscore-{row['nutriscore'].upper()}")
     if row.get("nova"):
@@ -131,6 +136,7 @@ def shelf_scan(req: ShelfScanRequest):
         goals=", ".join(profile["goals"]) or "none set",
         restrictions=", ".join(profile["restrictions"]) or "none",
         priorities=", ".join(profile["priorities"]) or "none set",
+        price_preference=profile.get("price_preference") or "not set",
     )
 
     # ── Call 1: Vision — category + visible products ───────────────────────── #
@@ -229,11 +235,19 @@ def shelf_scan(req: ShelfScanRequest):
         f"Pick the best one for this user."
     )
 
+    if req.conversation_history:
+        convo_lines = "\n".join(
+            f"{m.role.upper()}: {m.content}" for m in req.conversation_history[-4:]
+        )
+        conversation_context = f"RECENT CONVERSATION (use to infer user preferences):\n{convo_lines}\n\n"
+    else:
+        conversation_context = ""
+
     try:
         resp = client.chat.completions.create(
             model=MODEL,
             messages=[
-                {"role": "system", "content": RECOMMEND_SYSTEM.format(**profile_vars)},
+                {"role": "system", "content": RECOMMEND_SYSTEM.format(**profile_vars, conversation_context=conversation_context)},
                 {"role": "user", "content": user_content},
             ],
             temperature=0.3,

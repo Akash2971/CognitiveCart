@@ -236,7 +236,29 @@ def delete_scanned_products():
 @router.get("/scanned_products")
 def list_scanned_products():
     rows = get_all_scanned_products()
-    return [{"barcode": r["barcode"], "name": r["name"], "brand": r.get("brand"), "size": r.get("size"), "price": r.get("price")} for r in rows]
+    return [
+        {
+            "barcode": r["barcode"],
+            "name": r["name"],
+            "brand": r.get("brand"),
+            "size": r.get("size"),
+            "price": r.get("price"),
+            "nutriscore": r.get("nutriscore"),
+            "nova": r.get("nova"),
+            "ingredients": r.get("ingredients"),
+            "allergens": r.get("allergens"),
+            "labels": r.get("labels"),
+            "calories": r.get("calories"),
+            "fat": r.get("fat"),
+            "saturated_fat": r.get("saturated_fat"),
+            "carbs": r.get("carbs"),
+            "sugars": r.get("sugars"),
+            "fiber": r.get("fiber"),
+            "protein": r.get("protein"),
+            "sodium": r.get("sodium"),
+        }
+        for r in rows
+    ]
 
 
 @router.get("/lookup_barcode/{barcode}", response_model=BarcodeScanResponse)

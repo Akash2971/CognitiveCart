@@ -109,7 +109,8 @@ def init_new_tables() -> None:
             id INTEGER PRIMARY KEY DEFAULT 1,
             goals TEXT DEFAULT '[]',
             restrictions TEXT DEFAULT '[]',
-            priorities TEXT DEFAULT '[]'
+            priorities TEXT DEFAULT '[]',
+            price_preference TEXT DEFAULT ''
         );
         INSERT OR IGNORE INTO user_profile (id) VALUES (1);
     """)
@@ -183,19 +184,25 @@ def get_user_profile() -> dict:
     row = conn.execute("SELECT * FROM user_profile WHERE id = 1").fetchone()
     conn.close()
     if not row:
-        return {"goals": [], "restrictions": [], "priorities": []}
+        return {"goals": [], "restrictions": [], "priorities": [], "price_preference": ""}
     return {
         "goals": json.loads(row["goals"] or "[]"),
         "restrictions": json.loads(row["restrictions"] or "[]"),
         "priorities": json.loads(row["priorities"] or "[]"),
+        "price_preference": row["price_preference"] or "",
     }
 
 
-def set_user_profile(goals: list, restrictions: list, priorities: list) -> None:
+def set_user_profile(goals: list, restrictions: list, priorities: list, price_preference: str = "") -> None:
     conn = get_db()
+    try:
+        conn.execute("ALTER TABLE user_profile ADD COLUMN price_preference TEXT DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass
     conn.execute(
-        """UPDATE user_profile SET goals=?, restrictions=?, priorities=? WHERE id=1""",
-        (json.dumps(goals), json.dumps(restrictions), json.dumps(priorities)),
+        """UPDATE user_profile SET goals=?, restrictions=?, priorities=?, price_preference=? WHERE id=1""",
+        (json.dumps(goals), json.dumps(restrictions), json.dumps(priorities), price_preference),
     )
     conn.commit()
     conn.close()

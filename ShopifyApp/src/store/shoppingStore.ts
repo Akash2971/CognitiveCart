@@ -30,6 +30,7 @@ export interface UserProfile {
   goals: string[];
   restrictions: string[];
   priorities: string[];
+  price_preference: string;
 }
 
 interface ShoppingStore {
@@ -60,7 +61,7 @@ export const useShoppingStore = create<ShoppingStore>((set) => ({
   items: [],
   sessionId: null,
   messages: [],
-  userProfile: { goals: [], restrictions: [], priorities: [] },
+  userProfile: { goals: [], restrictions: [], priorities: [], price_preference: '' },
 
   addItem: (name) =>
     set((state) => {

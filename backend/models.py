@@ -204,6 +204,7 @@ class UserProfile(BaseModel):
     goals: list[str] = []
     restrictions: list[str] = []
     priorities: list[str] = []
+    price_preference: str = ""  # "budget" | "mid-range" | "premium" | ""
 
 
 # --------------------------------------------------------------------------- #
@@ -229,6 +230,7 @@ class DetectedProduct(BaseModel):
 
 class ShelfScanRequest(BaseModel):
     frames: list[str]  # base64 JPEGs
+    conversation_history: list[ChatMessage] = []
 
 class TopProduct(BaseModel):
     name: str

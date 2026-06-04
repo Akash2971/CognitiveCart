@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from database import get_store_location, get_all_store_locations
+from database import get_all_catalog, get_store_location, get_all_store_locations
 from models import LocationResponse, StoreLocation, UserProfile
 
 router = APIRouter()
@@ -29,6 +29,12 @@ def get_location(category: str):
     )
 
 
+@router.get("/catalog")
+def list_catalog():
+    rows = get_all_catalog()
+    return [{"name": r["name"], "brand": r.get("brand"), "barcode": r.get("barcode"), "category": r["category"]} for r in rows]
+
+
 @router.get("/user_profile")
 def read_profile():
     from database import get_user_profile
@@ -38,5 +44,5 @@ def read_profile():
 @router.post("/user_profile")
 def write_profile(profile: UserProfile):
     from database import set_user_profile
-    set_user_profile(profile.goals, profile.restrictions, profile.priorities)
+    set_user_profile(profile.goals, profile.restrictions, profile.priorities, profile.price_preference)
     return {"ok": True}

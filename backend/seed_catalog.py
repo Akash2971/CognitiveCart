@@ -8,7 +8,7 @@ BASE = "barcode images"
 DB_PATH = "products.db"
 PROGRESS_FILE = "seed_progress.json"
 OFF_URL = "https://world.openfoodfacts.org/api/v2/product/{}"
-OFF_FIELDS = "product_name,brands,serving_size,nutriments,nutriscore_grade,nova_group,allergens_tags,labels_tags"
+OFF_FIELDS = "product_name,brands,serving_size,quantity,nutriments,nutriscore_grade,nova_group,allergens_tags,labels_tags"
 OFF_HEADERS = {"User-Agent": "CognitiveCart/0.1 (akash29701@gmail.com)"}
 
 FOLDER_TO_CATEGORY = {
@@ -119,6 +119,7 @@ if to_fetch:
             "name":          p.get("product_name") or "",
             "brand":         (p.get("brands") or "").split(",")[0].strip(),
             "serving_size":  p.get("serving_size"),
+            "quantity":      p.get("quantity"),
             "nutriscore":    p.get("nutriscore_grade"),
             "nova":          p.get("nova_group"),
             "allergens":     json.dumps(strip_prefix(p.get("allergens_tags", []))),
@@ -160,18 +161,20 @@ conn.executescript("""
         allergens     TEXT DEFAULT '[]',
         labels        TEXT DEFAULT '[]',
         barcode       TEXT,
-        serving_size  TEXT
+        serving_size  TEXT,
+        quantity      TEXT,
+        price         REAL
     );
 """)
 
 for p in products:
     conn.execute("""
         INSERT INTO catalog
-          (barcode, name, brand, category, serving_size, nutriscore, nova,
+          (barcode, name, brand, category, serving_size, quantity, nutriscore, nova,
            allergens, labels, calories, protein, fat, saturated_fat,
            sugars, fiber, sodium, carbs)
         VALUES
-          (:barcode, :name, :brand, :category, :serving_size, :nutriscore, :nova,
+          (:barcode, :name, :brand, :category, :serving_size, :quantity, :nutriscore, :nova,
            :allergens, :labels, :calories, :protein, :fat, :saturated_fat,
            :sugars, :fiber, :sodium, :carbs)
     """, p)

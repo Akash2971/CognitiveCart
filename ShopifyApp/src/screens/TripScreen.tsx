@@ -15,6 +15,7 @@ import type { RootTabParamList } from '../../App';
 import Voice, { SpeechResultsEvent } from '@react-native-voice/voice';
 import Tts from 'react-native-tts';
 import Wearables, { wearablesEmitter } from '../../WearablesModule';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useShoppingStore } from '../store/shoppingStore';
 import BarcodeScanScreen, { type MinimalProduct } from './BarcodeScanScreen';
 import { BACKEND_URL } from '../config';
@@ -79,6 +80,7 @@ const VERDICT_LABEL: Record<string, string> = {
 export default function TripScreen() {
   const { userProfile } = useShoppingStore();
   const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>();
+  const insets = useSafeAreaInsets();
 
   // Trip state
   const [tripActive, setTripActive] = useState(false);
@@ -387,10 +389,11 @@ export default function TripScreen() {
     }
 
     try {
+      const recentHistory = pttMessages.slice(-4).map(m => ({ role: m.role, content: m.content }));
       const resp = await fetch(`${BACKEND_URL}/shelf_scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ frames }),
+        body: JSON.stringify({ frames, conversation_history: recentHistory }),
       });
       if (scanCancelledRef.current) return;
       const data: ShelfResult = await resp.json();
@@ -466,6 +469,11 @@ export default function TripScreen() {
                   Priorities: {userProfile.priorities.join(', ')}
                 </Text>
               )}
+              {userProfile.price_preference ? (
+                <Text style={styles.profileCardItem}>
+                  Budget: {userProfile.price_preference}
+                </Text>
+              ) : null}
               <Pressable style={styles.startBtn} onPress={startTrip}>
                 <Text style={styles.startBtnText}>Start Trip</Text>
               </Pressable>
@@ -484,7 +492,7 @@ export default function TripScreen() {
   if (showSummary && summary) {
     return (
       <View style={styles.container}>
-        <ScrollView contentContainerStyle={styles.summaryContent}>
+        <ScrollView contentContainerStyle={[styles.summaryContent, { paddingTop: insets.top + 24 }]}>
           <Text style={styles.summaryTitle}>Trip Summary</Text>
           <Text style={styles.summaryDuration}>{summary.duration}</Text>
           <Text style={styles.summaryDurationLabel}>Total Time</Text>
@@ -715,11 +723,11 @@ export default function TripScreen() {
             ) : (
               locations.map(loc => (
                 <View key={loc.category} style={styles.locationRow}>
-                  <Text style={styles.locationCategory}>{loc.category.replace('_', ' ')}</Text>
-                  <View>
+                  <View style={styles.locationTopLine}>
+                    <Text style={styles.locationCategory}>{loc.category.replace('_', ' ')}</Text>
                     <Text style={styles.locationAisle}>{loc.aisle}</Text>
-                    {loc.landmarks && <Text style={styles.locationLandmark}>{loc.landmarks}</Text>}
                   </View>
+                  {loc.landmarks && <Text style={styles.locationLandmark}>{loc.landmarks}</Text>}
                 </View>
               ))
             )}
@@ -870,13 +878,11 @@ const styles = StyleSheet.create({
   },
   locationTitle:      { color: '#fff', fontSize: 18, fontWeight: '700' },
   locationEmpty:      { color: '#555', fontSize: 14 },
-  locationRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
-    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2a2a2a',
-  },
-  locationCategory:   { color: '#9ca3af', fontSize: 14, fontWeight: '600', textTransform: 'capitalize', flex: 1 },
-  locationAisle:      { color: '#fff', fontSize: 14, fontWeight: '600', textAlign: 'right' },
-  locationLandmark:   { color: '#4b5563', fontSize: 12, textAlign: 'right', marginTop: 2 },
+  locationRow:        { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#2a2a2a', gap: 4 },
+  locationTopLine:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  locationCategory:   { color: '#9ca3af', fontSize: 14, fontWeight: '600', textTransform: 'capitalize' },
+  locationAisle:      { color: '#fff', fontSize: 14, fontWeight: '700' },
+  locationLandmark:   { color: '#4b5563', fontSize: 12 },
 
   // Summary
   summaryContent:     { padding: 24, gap: 8, alignItems: 'center' },
