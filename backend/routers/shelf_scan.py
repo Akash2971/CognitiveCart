@@ -27,7 +27,7 @@ product clearly belongs to that type:
 Do NOT output empty category when products are detected — only output "" when truly nothing is visible.
      If multiple categories are visible on the shelf, output the one that occupies the most shelf space or has the most products.
 
-2. List every product whose brand AND name you can read from the labels.
+2. List up to 5 products whose brand AND name you can clearly read from the labels. Do not infer or guess products — only include what is explicitly readable.
 
 Return valid JSON only:
 {
@@ -91,7 +91,7 @@ def _call_detect(frames: list[str]) -> dict:
                 {"role": "user", "content": content},
             ],
             temperature=0.1,
-            max_tokens=1024,
+            max_tokens=512,
             extra_body={"reasoning_effort": "none"},
         )
         usage = resp.usage
