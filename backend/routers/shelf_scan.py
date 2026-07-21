@@ -1,5 +1,8 @@
+import io
 import json
+import base64
 from fastapi import APIRouter
+from PIL import Image
 from config import GROQ_TEXT_MODEL as MODEL, GROQ_VISION_MODEL, groq_client as client
 from database import fuzzy_match_catalog, get_catalog_by_category, get_user_profile
 from models import DetectedProduct, ShelfScanRequest, ShelfScanResponse, TopProduct
@@ -62,9 +65,21 @@ Return valid JSON:
 """
 
 
+def _resize_frame(b64: str, max_dim: int = 224) -> str:
+    data = base64.b64decode(b64)
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    w, h = img.size
+    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+    print(f"[shelf_scan] resize {w}x{h} → {img.size[0]}x{img.size[1]}", flush=True)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=50)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
 def _call_detect(frames: list[str]) -> dict:
     content: list = []
-    for f in frames[:3]:
+    for f in frames[:2]:
+        f = _resize_frame(f)
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{f}"}})
     content.append({"type": "text", "text": "Identify the shelf category and list all readable products."})
 
@@ -76,8 +91,8 @@ def _call_detect(frames: list[str]) -> dict:
                 {"role": "user", "content": content},
             ],
             temperature=0.1,
-            max_tokens=512,
-            response_format={"type": "json_object"},
+            max_tokens=1024,
+            extra_body={"reasoning_effort": "none"},
         )
         usage = resp.usage
         print(
@@ -86,7 +101,16 @@ def _call_detect(frames: list[str]) -> dict:
             f"reasoning={getattr(usage, 'reasoning_tokens', None) or getattr(getattr(usage, 'completion_tokens_details', None), 'reasoning_tokens', 'n/a')}",
             flush=True,
         )
-        result = json.loads(resp.choices[0].message.content.strip())
+        msg = resp.choices[0].message
+        print("[shelf_scan] raw content:", repr(msg.content), flush=True)
+        print("[shelf_scan] reasoning_content:", repr(getattr(msg, 'reasoning_content', None)), flush=True)
+        raw = (msg.content or "").strip()
+        # Strip markdown fences if model wraps output
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw.strip())
         print("[shelf_scan] VLM raw output:", json.dumps(result, indent=2), flush=True)
         return result
     except Exception as e:
