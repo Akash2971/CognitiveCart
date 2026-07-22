@@ -78,7 +78,7 @@ def _resize_frame(b64: str, max_dim: int = 224) -> str:
 
 def _call_detect(frames: list[str]) -> dict:
     content: list = []
-    for f in frames[:2]:
+    for f in frames[:1]:
         f = _resize_frame(f)
         content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{f}"}})
     content.append({"type": "text", "text": "Identify the shelf category and list all readable products."})
