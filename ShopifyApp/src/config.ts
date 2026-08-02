@@ -1,1 +1,1 @@
-export const BACKEND_URL = 'http://192.168.1.10:8080';
+export const BACKEND_URL = 'https://cognitivecart-pc7m.onrender.com';
